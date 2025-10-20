@@ -6,7 +6,7 @@
 
 #define TYPE double
 #define DATASET_SIZE 6000
-#define CYCLES 100
+#define CYCLES 1
 #define LEARNING_RATE 1e-3
 
 typedef struct Neuron {
@@ -114,12 +114,25 @@ int main() {
     create_nn(&nn, 4, 10, 28 * 28, 10);
     
     unsigned char* c_label = labels;
-    unsigned char* c_image = images;
+    TYPE* c_image = images;
     
-    for(int cycle = 0; cycle < CYCLES) {
+    for(int cycle = 0; cycle < CYCLES; cycle++) {
+        TYPE total_loss = 0;
         for(int i = 0; i < DATASET_SIZE; i++) {
-            
+            call_nn(&nn, c_image);
+
+            for(int output_i = 0; output_i < 10; output_i++) {
+                TYPE expected_output = output_i == *c_label ? 1.0 : -1.0;
+                TYPE c_loss = expected_output - nn.layers[nn.num_layers - 1].neurons[output_i].value;
+                c_loss = c_loss * c_loss;
+                total_loss += c_loss;
+            }
+
+            c_label++;
+            c_image += 28 * 28;
         }
+        TYPE average_loss = total_loss / DATASET_SIZE;
+        printf("%f\n", average_loss);
     }
 
     return 0;
