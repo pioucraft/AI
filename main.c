@@ -78,6 +78,14 @@ int call_nn(NN* nn, TYPE* inputs) {
     }
 }
 
+int grad_nn(NN* nn, TYPE* inputs) {
+    for(int c_layer = nn->num_layers - 1; c_layer >= 0; c_layer--) {
+        for(int c_neuron = 0; c_neuron < nn->layers[c_layer].num_neurons; c_neuron++) {
+        }
+    }
+    return 0;
+}
+
 int main() {
     unsigned char buffer[256];
 
@@ -127,6 +135,8 @@ int main() {
                 c_loss = c_loss * c_loss;
                 total_loss += c_loss;
             }
+
+            grad_nn(&nn, c_image);
 
             c_label++;
             c_image += 28 * 28;
