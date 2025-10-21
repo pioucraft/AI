@@ -7,7 +7,7 @@
 #define TYPE double
 #define DATASET_SIZE 6000
 #define CYCLES 100
-#define LEARNING_RATE 1e-3
+#define LEARNING_RATE 1e-2
 
 typedef struct Neuron {
     TYPE* weights;
@@ -237,30 +237,31 @@ srand(42);
     
     for(int cycle = 0; cycle < CYCLES; cycle++) {
         TYPE total_loss = 0;
-        zero_grad_nn(&nn);
-        for(int i = 0; i < DATASET_SIZE; i++) {
-            call_nn(&nn, c_image);
+        for(int batch_start = 0; batch_start < DATASET_SIZE; batch_start += 32) {
+            zero_grad_nn(&nn);
+            for(int i = batch_start; i < batch_start + 32; i++) {
+                call_nn(&nn, c_image);
 
-            TYPE* outputs = malloc(sizeof(TYPE) * 10);
-            for(int output_i = 0; output_i < 10; output_i++) {
-                TYPE expected_output = output_i == *c_label ? 1.0 : -1.0;
-                outputs[output_i] = expected_output;
-                TYPE c_loss = expected_output - nn.layers[nn.num_layers - 1].neurons[output_i].value;
-                c_loss = c_loss * c_loss;
-                total_loss += c_loss;
+                TYPE* outputs = malloc(sizeof(TYPE) * 10);
+                for(int output_i = 0; output_i < 10; output_i++) {
+                    TYPE expected_output = output_i == *c_label ? 1.0 : -1.0;
+                    outputs[output_i] = expected_output;
+                    TYPE c_loss = expected_output - nn.layers[nn.num_layers - 1].neurons[output_i].value;
+                    c_loss = c_loss * c_loss;
+                    total_loss += c_loss;
+                }
+
+                grad_nn(&nn, c_image, outputs);
+
+                c_label++;
+                c_image += 28 * 28;
             }
-
-            grad_nn(&nn, c_image, outputs);
-
-            c_label++;
-            c_image += 28 * 28;
+            update_nn(&nn, LEARNING_RATE);
         }
-        TYPE average_loss = total_loss / DATASET_SIZE;
-        printf("%f\n", average_loss);
-        // print_nn_stats(&nn, 3);
         c_label = labels;
         c_image = images;
-        update_nn(&nn, LEARNING_RATE);
+        TYPE average_loss = total_loss / DATASET_SIZE;
+        printf("%f\n", average_loss);
     }
 
     return 0;
