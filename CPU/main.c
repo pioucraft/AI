@@ -5,9 +5,11 @@
 #include <string.h>
 
 #define TYPE double
-#define DATASET_SIZE 6000
-#define CYCLES 100
-#define LEARNING_RATE 1e-2
+#define DATASET_SIZE 600
+#define CYCLES 5
+#define LEARNING_RATE 1e-3
+
+#define BUFFER_SIZE 1024
 
 typedef struct Neuron {
     TYPE* weights;
@@ -66,53 +68,52 @@ int create_nn(NN* nn, int num_layers, int num_neurons_per_layer, int num_in, int
 int call_nn(NN* nn, TYPE* inputs) {
     int num_layers = nn->num_layers;
     for(int c_layer = 0; c_layer < num_layers; c_layer++) {
-        for(int c_neuron = 0; c_neuron < nn->layers[c_layer].num_neurons; c_neuron++) {
+        Layer* layer = &(nn->layers[c_layer]);
+
+        for(int c_neuron = 0; c_neuron < layer->num_neurons; c_neuron++) {
+        Neuron* neuron = &(layer->neurons[c_neuron]);
 
             TYPE current_value = 0;
-            for(int c_weight = 0; c_weight < nn->layers[c_layer].neurons[c_neuron].num_weights; c_weight++) {
-                current_value += nn->layers[c_layer].neurons[c_neuron].weights[c_weight] *
+            for(int c_weight = 0; c_weight < neuron->num_weights; c_weight++) {
+                current_value += neuron->weights[c_weight] *
                     (c_layer == 0 ? inputs[c_weight] : nn->layers[c_layer - 1].neurons[c_weight].value);
             }
-            current_value += nn->layers[c_layer].neurons[c_neuron].bias;
+            current_value += neuron->bias;
 
             if(c_layer == num_layers - 1) {
                 current_value = tanh(current_value);
             } else if(current_value < 0) { // basically leaky ReLU
                 current_value = 0.01 * current_value;
             }
-            nn->layers[c_layer].neurons[c_neuron].value = current_value;
+            neuron->value = current_value;
         }
     }
 }
 
 int grad_nn(NN* nn, TYPE* inputs, TYPE* outputs) {
     for(int c_layer = nn->num_layers - 1; c_layer >= 0; c_layer--) {
-        if(c_layer != 0) {
-            for(int i = 0; i < nn->layers[c_layer - 1].num_neurons; i++) {
-                nn->layers[c_layer - 1].neurons[i].sum_grads = 0;
-            }
-        }
+        Layer* layer = &(nn->layers[c_layer]);
         for(int c_neuron = 0; c_neuron < nn->layers[c_layer].num_neurons; c_neuron++) {
-            if(c_layer == nn->num_layers -1) {
-                TYPE error = nn->layers[c_layer].neurons[c_neuron].value - outputs[c_neuron]; 
-                nn->layers[c_layer].neurons[c_neuron].grad = error * (1 - nn->layers[c_layer].neurons[c_neuron].value * nn->layers[c_layer].neurons[c_neuron].value);
+        Neuron* neuron = &(layer->neurons[c_neuron]);
+            if(c_layer == nn->num_layers - 1) {
+                TYPE error = neuron->value - outputs[c_neuron]; 
+                neuron->grad = 2 * error * (1 - neuron->value * neuron->value);
             }
             else {
-                nn->layers[c_layer].neurons[c_neuron].grad = (nn->layers[c_layer].neurons[c_neuron].value > 0 ? 1.0 : 0.01) * nn->layers[c_layer].neurons[c_neuron].sum_grads;
-            }
-
-            nn->layers[c_layer].neurons[c_neuron].bias_grad += nn->layers[c_layer].neurons[c_neuron].grad;
-
-            for(int c_weight = 0; c_weight < nn->layers[c_layer].neurons[c_neuron].num_weights; c_weight++) {
-                if(c_layer == 0) {
-                    nn->layers[c_layer].neurons[c_neuron].weights_grads[c_weight] += nn->layers[c_layer].neurons[c_neuron].grad * inputs[c_weight];
-                } else {
-                    nn->layers[c_layer].neurons[c_neuron].weights_grads[c_weight] += nn->layers[c_layer].neurons[c_neuron].grad * nn->layers[c_layer - 1].neurons[c_weight].value;
+                TYPE sum_grad = 0.0;
+                for(int i = 0; i < nn->layers[c_layer + 1].num_neurons; i++) {
+                    sum_grad += nn->layers[c_layer + 1].neurons[i].weights[c_neuron] * nn->layers[c_layer + 1].neurons[i].grad;
                 }
+                neuron->grad = (neuron->value > 0 ? 1.0 : 0.01) * sum_grad;
             }
-            if(c_layer != 0) {
-                for(int i = 0; i < nn->layers[c_layer - 1].num_neurons; i++) {
-                    nn->layers[c_layer - 1].neurons[i].sum_grads += nn->layers[c_layer].neurons[c_neuron].weights[i] * nn->layers[c_layer].neurons[c_neuron].grad;
+
+            neuron->bias_grad += neuron->grad;
+
+            for(int c_weight = 0; c_weight < neuron->num_weights; c_weight++) {
+                if(c_layer == 0) {
+                    neuron->weights_grads[c_weight] += neuron->grad * inputs[c_weight];
+                } else {
+                    neuron->weights_grads[c_weight] += neuron->grad * nn->layers[c_layer - 1].neurons[c_weight].value;
                 }
             }
         }
@@ -153,52 +154,8 @@ void update_nn(NN* nn, TYPE learning_rate) {
     }
 }
 
-void print_nn_stats(NN* nn, int layer_limit) {
-    for (int l = 0; l < nn->num_layers && l < layer_limit; l++) {
-        Layer* layer = &nn->layers[l];
-        printf("Layer %d: %d neurons\n", l, layer->num_neurons);
-
-        for (int n = 0; n < layer->num_neurons; n++) {
-            Neuron* neuron = &layer->neurons[n];
-
-            TYPE weight_sum = 0.0;
-            TYPE weight_max = neuron->weights[0];
-            TYPE weight_min = neuron->weights[0];
-            TYPE grad_sum = 0.0;
-            TYPE grad_max = neuron->grad;
-            TYPE grad_min = neuron->grad;
-
-            for (int w = 0; w < neuron->num_weights; w++) {
-                TYPE val = neuron->weights[w];
-                weight_sum += val;
-                if (val > weight_max) weight_max = val;
-                if (val < weight_min) weight_min = val;
-
-                TYPE g = neuron->weights_grads[w];
-                grad_sum += g;
-                if (g > grad_max) grad_max = g;
-                if (g < grad_min) grad_min = g;
-            }
-
-            printf(" Neuron %d: bias=%.4f grad=%.4f | weights sum=%.4f, min=%.4f, max=%.4f | grads sum=%.4f, min=%.4f, max=%.4f\n",
-                   n,
-                   neuron->bias,
-                   neuron->grad,
-                   weight_sum,
-                   weight_min,
-                   weight_max,
-                   grad_sum,
-                   grad_min,
-                   grad_max
-            );
-        }
-        printf("\n");
-    }
-}
-
 int main() {
-srand(42);
-    unsigned char buffer[256];
+    unsigned char buffer[BUFFER_SIZE];
 
     FILE *imagesF = fopen("train-images", "rb");
     unsigned char* imagesS = NULL;
@@ -221,7 +178,7 @@ srand(42);
     
     read_bytes = 0;
     total_bytes = 0;
-    while((read_bytes = fread(buffer, sizeof(unsigned char), 256, labelsF)) != 0) {
+    while((read_bytes = fread(buffer, sizeof(unsigned char), BUFFER_SIZE, labelsF)) != 0) {
         total_bytes += read_bytes; 
         labelsS = realloc(labelsS, sizeof(unsigned char) * total_bytes);
         memcpy(labelsS + total_bytes - read_bytes, buffer, read_bytes);
@@ -230,11 +187,12 @@ srand(42);
     unsigned char* labels = labelsS + 8;
 
     NN nn;
-    create_nn(&nn, 4, 10, 28 * 28, 10);
+    create_nn(&nn, 4, 128, 28 * 28, 10);
     
     unsigned char* c_label = labels;
     TYPE* c_image = images;
     
+    TYPE* outputs = malloc(sizeof(TYPE) * 10);
     for(int cycle = 0; cycle < CYCLES; cycle++) {
         TYPE total_loss = 0;
         for(int batch_start = 0; batch_start < DATASET_SIZE; batch_start += 32) {
@@ -242,8 +200,7 @@ srand(42);
             for(int i = batch_start; i < batch_start + 32; i++) {
                 call_nn(&nn, c_image);
 
-                TYPE* outputs = malloc(sizeof(TYPE) * 10);
-                for(int output_i = 0; output_i < 10; output_i++) {
+                for(unsigned char output_i = 0; output_i < 10; output_i++) {
                     TYPE expected_output = output_i == *c_label ? 1.0 : -1.0;
                     outputs[output_i] = expected_output;
                     TYPE c_loss = expected_output - nn.layers[nn.num_layers - 1].neurons[output_i].value;
@@ -261,7 +218,7 @@ srand(42);
         c_label = labels;
         c_image = images;
         TYPE average_loss = total_loss / DATASET_SIZE;
-        printf("%f\n", average_loss);
+        printf("%.17f\n", average_loss);
     }
 
     return 0;
