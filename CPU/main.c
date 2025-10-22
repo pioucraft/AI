@@ -6,7 +6,7 @@
 
 #define TYPE double
 #define DATASET_SIZE 30000
-#define CYCLES 10
+#define CYCLES 20
 #define LEARNING_RATE 1e-3
 
 #define BUFFER_SIZE 1024
@@ -218,7 +218,7 @@ int main() {
         c_label = labels;
         c_image = images;
         TYPE average_loss = total_loss / DATASET_SIZE;
-        printf("%.17f\n", average_loss);
+        printf("%d: %.17f\n", cycle, average_loss);
     }
 
     return 0;

@@ -6,8 +6,8 @@
 #define TYPE float
 #define NUM_LAYERS 4
 #define NUM_NEURONS_PER_LAYER 128
-#define CYCLES 10
-#define DATASET_SIZE 600
+#define CYCLES 20
+#define DATASET_SIZE 30000
 #define BATCH_SIZE 32
 #define LEARNING_RATE 1e-3
 
@@ -160,6 +160,19 @@ void call_nn(NN nn, TYPE* inputs) {
 }
 
 __global__ void grad_layer(NN nn, int c_layer, TYPE* inputs, TYPE* outputs, int test) {
+    if(test && threadIdx.x == 0 && blockIdx.x == 0 && c_layer == nn.num_layers - 1) {
+        for(int i = 0; i < 10; i++) {
+            printf("%d : %f\n", i, nn.layers[c_layer].neurons[i].value);
+        }
+        for(int i = 0; i < 28; i++) {
+            for(int j = 0; j < 28; j++) {
+                if(inputs[i*28 + j] > 0.5) printf("#");
+                else printf(".");
+            }
+            printf("\n");
+        }
+    }
+    __syncthreads();
     Layer* layer = &nn.layers[c_layer];
     if(blockIdx.x < layer->num_neurons) {
         Neuron* neuron = &layer->neurons[blockIdx.x];
@@ -283,6 +296,8 @@ int main() {
             update_nn<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn, LEARNING_RATE);
             cudaDeviceSynchronize();
         }
+        c_label = device_labels;
+        c_image = device_images;
     }
 
     return 0;
