@@ -3,3 +3,4 @@
 - Some kind of good weights initialization
 - MNIST
 - Mean Squared Error
+- CUDA
