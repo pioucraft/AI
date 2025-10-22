@@ -5,8 +5,8 @@
 #include <string.h>
 
 #define TYPE double
-#define DATASET_SIZE 600
-#define CYCLES 5
+#define DATASET_SIZE 30000
+#define CYCLES 10
 #define LEARNING_RATE 1e-3
 
 #define BUFFER_SIZE 1024

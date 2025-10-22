@@ -32,11 +32,13 @@ typedef struct NN {
 
 void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_layer) {
     int num_neurons = (num_layers - 1) * num_neurons_per_layer + nout;
-    int num_weights = num_neurons_per_layer * nin + (num_layers - 2) * num_neurons_per_layer + nout * num_neurons_per_layer;
+    int num_weights = nin * num_neurons_per_layer + num_neurons_per_layer * num_neurons_per_layer * (num_layers - 2) + num_neurons_per_layer * nout;
     Neuron* neurons;
     TYPE* weights;
+    TYPE* weights_grads;
     cudaMalloc(&neurons, sizeof(Neuron) * num_neurons);
     cudaMalloc(&weights, sizeof(TYPE) * num_weights);
+    cudaMalloc(&weights_grads, sizeof(TYPE) * num_weights);
     int c_neuron_total = 0;
     int c_weight_total = 0;
 
@@ -46,7 +48,7 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
     for(int c_layer = 0; c_layer < num_layers; c_layer++) {
 
         Layer layer;
-        int c_num_neurons = c_layer == num_layers - 1 ? nin : num_neurons_per_layer;
+        int c_num_neurons = c_layer == num_layers - 1 ? nout : num_neurons_per_layer;
         layer.num_neurons = c_num_neurons;
         layer.neurons = neurons + c_neuron_total;
         
@@ -57,15 +59,16 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
             int c_num_weights = c_layer == 0 ? nin : num_neurons_per_layer;
             neuron.num_weights = c_num_weights;
             neuron.weights = weights + c_weight_total;
+            neuron.weights_grads = weights_grads + c_weight_total;
 
             for(int c_weight = 0; c_weight < c_num_weights; c_weight++) {
-                TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX;
-                random_value = random_value * (sqrt(8.0 / c_num_weights));
+                TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX * 2 - 1;
+                random_value = (TYPE)(random_value * (sqrt(8.0 / c_num_weights)));
                 cudaMemcpy(weights + c_weight_total, &random_value, sizeof(TYPE), cudaMemcpyHostToDevice);
                 c_weight_total++;
             }
 
-            TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX;
+            TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX * 2 - 1;
             random_value = random_value * (sqrt(8.0 / c_num_weights));
             neuron.bias = random_value;
 
@@ -76,14 +79,9 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
     }
 }
 
-__global__ void test(NN* nn ) {
-    printf("%f\n", nn->layers[0].neurons[0].weights[0]);
-}
-
 int main() {
     NN nn;
     create_nn(&nn, 28 * 28, 10, NUM_LAYERS, NUM_NEURONS_PER_LAYER);
-    test<<<1, 1>>>(&nn);
     cudaDeviceSynchronize();
     return 0;
 }
