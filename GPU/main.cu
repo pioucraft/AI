@@ -9,6 +9,7 @@
 #define CYCLES 10
 #define DATASET_SIZE 30000
 #define BATCH_SIZE 32
+#define LEARNING_RATE 1e-3
 
 #define BUFFER_SIZE 1024
 
@@ -156,6 +157,63 @@ void call_nn(NN nn, TYPE* inputs) {
     }
 }
 
+__global__ void grad_layer(NN nn, int c_layer, TYPE* inputs, TYPE* outputs, int test) {
+    Layer* layer = &nn.layers[c_layer];
+    if(blockIdx.x < layer->num_neurons) {
+        Neuron* neuron = &layer->neurons[blockIdx.x];
+        if(threadIdx.x < neuron->num_weights) {
+            if(threadIdx.x == 0) {
+                if(c_layer == nn.num_layers - 1) {
+                    TYPE error = neuron->value - outputs[blockIdx.x];
+                    if(test) printf("%f\n", error);
+                    neuron->grad = 2 * error * (1 - neuron->value * neuron->value);
+                } else {
+                    TYPE sum_grad = 0.0;
+                    for(int i = 0; i < nn.layers[c_layer + 1].num_neurons; i++) {
+                        sum_grad += nn.layers[c_layer + 1].neurons[i].weights[blockIdx.x] * nn.layers[c_layer + 1].neurons[i].grad;
+                    }
+                    neuron->grad = (neuron->value > 0 ? 1 : 0.01) * sum_grad;
+                }
+
+                neuron->bias_grad += neuron->grad;
+            }
+            __syncthreads();
+
+            if(c_layer == 0) {
+                neuron->weights_grads[threadIdx.x] += neuron->grad * inputs[threadIdx.x];
+            } else {
+                neuron->weights_grads[threadIdx.x] += neuron->grad * nn.layers[c_layer - 1].neurons[threadIdx.x].value;
+            }
+
+        }
+    }
+}
+
+void grad_nn(NN nn, TYPE* inputs, TYPE* outputs, int test) {
+    for(int i = NUM_LAYERS - 1; i >= 0; i--) {
+        grad_layer<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn, i, inputs, outputs, test);
+        cudaDeviceSynchronize();
+    }
+}
+
+__global__ void update_nn(NN nn, TYPE learning_rate) {
+    for (int l = 0; l < nn.num_layers; l++) {
+        Layer* layer = &nn.layers[l];
+        if(blockIdx.x < layer->num_neurons) {
+            Neuron* neuron = &layer->neurons[blockIdx.x];
+
+            if(threadIdx.x < neuron->num_weights) {
+                neuron->weights[threadIdx.x] -= learning_rate * neuron->weights_grads[threadIdx.x];
+
+                if(threadIdx.x == 0) {
+                    neuron->bias -= learning_rate * neuron->bias_grad;
+                }
+            }
+
+        }
+    }
+}
+
 int main() {
     unsigned char buffer[BUFFER_SIZE];
 
@@ -217,7 +275,11 @@ int main() {
             cudaDeviceSynchronize();
             for(int i = batch_start; i < batch_start + BATCH_SIZE; i++) {
                 call_nn(nn, c_image);
+                grad_nn(nn, c_image, c_label, i == 0);
+                c_label += 10;
+                c_image += 28 * 28;
             }
+            update_nn<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn, LEARNING_RATE);
         }
     }
 
