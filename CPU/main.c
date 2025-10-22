@@ -208,12 +208,12 @@ int main() {
                     total_loss += c_loss;
                 }
 
-                grad_nn(&nn, c_image, outputs);
+                // grad_nn(&nn, c_image, outputs);
 
                 c_label++;
                 c_image += 28 * 28;
             }
-            update_nn(&nn, LEARNING_RATE);
+            // update_nn(&nn, LEARNING_RATE);
         }
         c_label = labels;
         c_image = images;

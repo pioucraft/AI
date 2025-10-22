@@ -6,6 +6,11 @@
 #define TYPE float
 #define NUM_LAYERS 4
 #define NUM_NEURONS_PER_LAYER 128
+#define CYCLES 10
+#define DATASET_SIZE 30000
+#define BATCH_SIZE 32
+
+#define BUFFER_SIZE 1024
 
 typedef struct Neuron {
     TYPE* weights;
@@ -79,9 +84,142 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
     }
 }
 
+__global__ void zero_grad(NN nn) {
+    for(int l = 0; l < nn.num_layers; l++) {
+        Layer* layer = &nn.layers[l];
+        if(blockIdx.x < layer->num_neurons) {
+            Neuron* neuron = &layer->neurons[blockIdx.x];
+            if(threadIdx.x < neuron->num_weights) {
+                if(threadIdx.x == 0) {
+                    neuron->bias_grad = 0;
+                    neuron->sum_grads = 0;
+                    neuron->grad = 0;
+                }
+                neuron->weights_grads[threadIdx.x] = 0;
+            }
+        }
+    }
+}
+
+__global__ void call_layer(NN nn, int c_layer, TYPE* inputs) {
+
+    Layer* layer = &nn.layers[c_layer];
+    
+    if(blockIdx.x < layer->num_neurons) {
+        Neuron* neuron = &layer->neurons[blockIdx.x];
+        if(threadIdx.x < neuron->num_weights) {
+            __shared__ TYPE partials[1024];
+            __syncthreads();
+            if(c_layer == 0) {
+                partials[threadIdx.x] = neuron->weights[threadIdx.x] * inputs[threadIdx.x];
+            } else {
+                partials[threadIdx.x] = neuron->weights[threadIdx.x] * nn.layers[c_layer - 1].neurons[threadIdx.x].value;
+            }
+            __syncthreads();
+
+
+            int finished = 0;
+            int divisibleBy = 2;
+            int total_finished = 0;
+
+            while(!total_finished) {
+                if(!finished && threadIdx.x % divisibleBy == 0) {
+                    if(threadIdx.x + divisibleBy / 2 < neuron->num_weights) {
+                        partials[threadIdx.x] += partials[threadIdx.x + divisibleBy / 2];
+                    }
+                } else {
+                    finished = 1;
+                }
+                if(divisibleBy > 512) {
+                    total_finished = 1;
+                }
+                divisibleBy *= 2;
+                __syncthreads();
+            }
+
+            if(threadIdx.x == 0) {
+                neuron->value = partials[0] + neuron->bias;
+                if(c_layer == nn.num_layers - 1) {
+                    neuron->value = tanh(neuron->value);
+                } else if(neuron->value < 0) {
+                    neuron->value = neuron->value * 0.01;
+                }
+            }
+        }
+    }
+}
+
+void call_nn(NN nn, TYPE* inputs) {
+    for(int i = 0; i < NUM_LAYERS; i++) {
+        call_layer<<<NUM_NEURONS_PER_LAYER, 28 * 28>>>(nn, i, inputs);
+        cudaDeviceSynchronize();
+    }
+}
+
 int main() {
+    unsigned char buffer[BUFFER_SIZE];
+
+    FILE *imagesF = fopen("train-images", "rb");
+    unsigned char* imagesS = NULL;
+    
+    int read_bytes = 0;
+    int total_bytes = 0;
+    while((read_bytes = fread(buffer, sizeof(unsigned char), 256, imagesF)) != 0) {
+        total_bytes += read_bytes; 
+        imagesS = (unsigned char*) realloc(imagesS, sizeof(unsigned char) * total_bytes);
+        memcpy(imagesS + total_bytes - read_bytes, buffer, read_bytes);
+    }
+    
+    TYPE* images = (TYPE*) malloc(sizeof(TYPE) * (total_bytes - 16));
+    for(int i = 0; i < total_bytes - 16; i++) {
+        images[i] = (TYPE)imagesS[16 + i] / 255.0;
+    }
+
+    FILE *labelsF = fopen("train-labels", "rb");
+    unsigned char* labelsS = NULL;
+    
+    read_bytes = 0;
+    total_bytes = 0;
+    while((read_bytes = fread(buffer, sizeof(unsigned char), BUFFER_SIZE, labelsF)) != 0) {
+        total_bytes += read_bytes; 
+        labelsS = (unsigned char*) realloc(labelsS, sizeof(unsigned char) * total_bytes);
+        memcpy(labelsS + total_bytes - read_bytes, buffer, read_bytes);
+    }
+    
+    TYPE* labels = (TYPE*) malloc(sizeof(TYPE) * (total_bytes - 8) * 10);
+    for(int i = 0; i < total_bytes - 8; i++) {
+        for(int j = 0; j < 10; j++) {
+            if (j == labelsS[i + 8]) {
+                labels[i*10 + j] = 1.0;
+            } else {
+                labels[i*10 + j] = -1.0;
+            }
+        }
+    }
+
+    TYPE* device_labels;
+    TYPE* device_images;
+    cudaMalloc(&device_labels, sizeof(TYPE) * DATASET_SIZE * 10);
+    cudaMalloc(&device_images, sizeof(TYPE) * DATASET_SIZE * 28 * 28);
+    cudaMemcpy(device_labels, labels, sizeof(TYPE) * DATASET_SIZE * 10, cudaMemcpyHostToDevice);
+    cudaMemcpy(device_images, images, sizeof(TYPE) * DATASET_SIZE * 28 * 28, cudaMemcpyHostToDevice);
+
     NN nn;
     create_nn(&nn, 28 * 28, 10, NUM_LAYERS, NUM_NEURONS_PER_LAYER);
-    cudaDeviceSynchronize();
+
+    TYPE* c_label = device_labels;
+    TYPE* c_image = device_images;
+
+    for(int cycle = 0; cycle < CYCLES; cycle++) {
+        printf("%d\n", cycle);
+        for(int batch_start = 0; batch_start < DATASET_SIZE; batch_start += BATCH_SIZE) {
+            zero_grad<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn);
+            cudaDeviceSynchronize();
+            for(int i = batch_start; i < batch_start + BATCH_SIZE; i++) {
+                call_nn(nn, c_image);
+            }
+        }
+    }
+
     return 0;
 }
