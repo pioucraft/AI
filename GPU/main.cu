@@ -7,7 +7,7 @@
 #define NUM_LAYERS 4
 #define NUM_NEURONS_PER_LAYER 128
 #define CYCLES 10
-#define DATASET_SIZE 30000
+#define DATASET_SIZE 600
 #define BATCH_SIZE 32
 #define LEARNING_RATE 1e-3
 
@@ -50,6 +50,7 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
 
     cudaMalloc(&nn->layers, sizeof(Layer) * num_layers);
     nn->num_layers = num_layers;
+    cudaDeviceSynchronize();
     
     for(int c_layer = 0; c_layer < num_layers; c_layer++) {
 
@@ -83,6 +84,7 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
         }
         cudaMemcpy(nn->layers + c_layer, &layer, sizeof(Layer), cudaMemcpyHostToDevice);
     }
+    cudaDeviceSynchronize();
 }
 
 __global__ void zero_grad(NN nn) {
@@ -165,7 +167,6 @@ __global__ void grad_layer(NN nn, int c_layer, TYPE* inputs, TYPE* outputs, int 
             if(threadIdx.x == 0) {
                 if(c_layer == nn.num_layers - 1) {
                     TYPE error = neuron->value - outputs[blockIdx.x];
-                    if(test) printf("%f\n", error);
                     neuron->grad = 2 * error * (1 - neuron->value * neuron->value);
                 } else {
                     TYPE sum_grad = 0.0;
@@ -273,13 +274,14 @@ int main() {
         for(int batch_start = 0; batch_start < DATASET_SIZE; batch_start += BATCH_SIZE) {
             zero_grad<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn);
             cudaDeviceSynchronize();
-            for(int i = batch_start; i < batch_start + BATCH_SIZE; i++) {
+            for(int i = batch_start; i < batch_start + BATCH_SIZE && i < DATASET_SIZE; i++) {
                 call_nn(nn, c_image);
                 grad_nn(nn, c_image, c_label, i == 0);
                 c_label += 10;
                 c_image += 28 * 28;
             }
             update_nn<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn, LEARNING_RATE);
+            cudaDeviceSynchronize();
         }
     }
 
