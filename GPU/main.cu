@@ -154,7 +154,7 @@ __global__ void call_layer(NN nn, int c_layer, TYPE* inputs) {
 
 void call_nn(NN nn, TYPE* inputs) {
     for(int i = 0; i < NUM_LAYERS; i++) {
-        call_layer<<<NUM_NEURONS_PER_LAYER, 28 * 28>>>(nn, i, inputs);
+        call_layer<<<i == NUM_LAYERS - 1 ? 10 : NUM_NEURONS_PER_LAYER, i == 0 ? 28*28 : NUM_NEURONS_PER_LAYER>>>(nn, i, inputs);
         cudaDeviceSynchronize();
     }
 }
@@ -205,7 +205,7 @@ __global__ void grad_layer(NN nn, int c_layer, TYPE* inputs, TYPE* outputs, int 
 
 void grad_nn(NN nn, TYPE* inputs, TYPE* outputs, int test) {
     for(int i = NUM_LAYERS - 1; i >= 0; i--) {
-        grad_layer<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn, i, inputs, outputs, test);
+        grad_layer<<<i == NUM_LAYERS - 1 ? 10 : NUM_NEURONS_PER_LAYER, i == 0 ? 28*28 : NUM_NEURONS_PER_LAYER>>>(nn, i, inputs, outputs, test);
         cudaDeviceSynchronize();
     }
 }
@@ -285,7 +285,7 @@ int main() {
     for(int cycle = 0; cycle < CYCLES; cycle++) {
         printf("%d\n", cycle);
         for(int batch_start = 0; batch_start < DATASET_SIZE; batch_start += BATCH_SIZE) {
-            zero_grad<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn);
+            zero_grad<<<NUM_NEURONS_PER_LAYER, 28*28>>>(nn);
             cudaDeviceSynchronize();
             for(int i = batch_start; i < batch_start + BATCH_SIZE && i < DATASET_SIZE; i++) {
                 call_nn(nn, c_image);
@@ -293,7 +293,7 @@ int main() {
                 c_label += 10;
                 c_image += 28 * 28;
             }
-            update_nn<<<NUM_NEURONS_PER_LAYER, NUM_NEURONS_PER_LAYER>>>(nn, LEARNING_RATE);
+            update_nn<<<NUM_NEURONS_PER_LAYER, 28*28>>>(nn, LEARNING_RATE);
             cudaDeviceSynchronize();
         }
         c_label = device_labels;
