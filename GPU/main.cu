@@ -6,12 +6,27 @@
 #define TYPE float
 #define NUM_LAYERS 4
 #define NUM_NEURONS_PER_LAYER 128
-#define CYCLES 20
+#define CYCLES 200
 #define DATASET_SIZE 30000
 #define BATCH_SIZE 32
 #define LEARNING_RATE 1e-3
 
 #define BUFFER_SIZE 1024
+
+#define CUDA_CHECK_ERROR(msg) \
+    { \
+        cudaError_t err = cudaGetLastError(); \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA error after %s at %s:%d: %s\n", msg, __FILE__, __LINE__, cudaGetErrorString(err)); \
+        } \
+    }
+#define CUDA_SYNC_CHECK(msg) \
+    { \
+        cudaError_t err = cudaDeviceSynchronize(); \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA sync error after %s at %s:%d: %s\n", msg, __FILE__, __LINE__, cudaGetErrorString(err)); \
+        } \
+    }
 
 typedef struct Neuron {
     TYPE* weights;
@@ -85,6 +100,7 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
         cudaMemcpy(nn->layers + c_layer, &layer, sizeof(Layer), cudaMemcpyHostToDevice);
     }
     cudaDeviceSynchronize();
+    CUDA_SYNC_CHECK("cudaDeviceSynchronize in create_nn");
 }
 
 __global__ void zero_grad(NN nn) {
@@ -155,7 +171,10 @@ __global__ void call_layer(NN nn, int c_layer, TYPE* inputs) {
 void call_nn(NN nn, TYPE* inputs) {
     for(int i = 0; i < NUM_LAYERS; i++) {
         call_layer<<<i == NUM_LAYERS - 1 ? 10 : NUM_NEURONS_PER_LAYER, i == 0 ? 28*28 : NUM_NEURONS_PER_LAYER>>>(nn, i, inputs);
+        CUDA_CHECK_ERROR("call_layer kernel launch");
         cudaDeviceSynchronize();
+        CUDA_SYNC_CHECK("cudaDeviceSynchronize in call_nn");
+        CUDA_SYNC_CHECK("call_layer kernel");
     }
 }
 
@@ -206,7 +225,10 @@ __global__ void grad_layer(NN nn, int c_layer, TYPE* inputs, TYPE* outputs, int 
 void grad_nn(NN nn, TYPE* inputs, TYPE* outputs, int test) {
     for(int i = NUM_LAYERS - 1; i >= 0; i--) {
         grad_layer<<<i == NUM_LAYERS - 1 ? 10 : NUM_NEURONS_PER_LAYER, i == 0 ? 28*28 : NUM_NEURONS_PER_LAYER>>>(nn, i, inputs, outputs, test);
+        CUDA_CHECK_ERROR("grad_layer kernel launch");
         cudaDeviceSynchronize();
+        CUDA_SYNC_CHECK("cudaDeviceSynchronize in grad_nn");
+        CUDA_SYNC_CHECK("grad_layer kernel");
     }
 }
 
@@ -286,7 +308,9 @@ int main() {
         printf("%d\n", cycle);
         for(int batch_start = 0; batch_start < DATASET_SIZE; batch_start += BATCH_SIZE) {
             zero_grad<<<NUM_NEURONS_PER_LAYER, 28*28>>>(nn);
+            CUDA_CHECK_ERROR("zero_grad kernel launch");
             cudaDeviceSynchronize();
+            CUDA_SYNC_CHECK("zero_grad kernel");
             for(int i = batch_start; i < batch_start + BATCH_SIZE && i < DATASET_SIZE; i++) {
                 call_nn(nn, c_image);
                 grad_nn(nn, c_image, c_label, i == 0);
@@ -294,7 +318,9 @@ int main() {
                 c_image += 28 * 28;
             }
             update_nn<<<NUM_NEURONS_PER_LAYER, 28*28>>>(nn, LEARNING_RATE);
+            CUDA_CHECK_ERROR("update_nn kernel launch");
             cudaDeviceSynchronize();
+            CUDA_SYNC_CHECK("update_nn kernel");
         }
         c_label = device_labels;
         c_image = device_images;
