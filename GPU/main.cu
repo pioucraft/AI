@@ -84,14 +84,12 @@ void create_nn(NN* nn, int nin, int nout, int num_layers, int num_neurons_per_la
             neuron.weights_grads = weights_grads + c_weight_total;
 
             for(int c_weight = 0; c_weight < c_num_weights; c_weight++) {
-                TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX * 2 - 1;
-                random_value = (TYPE)(random_value * (sqrt(8.0 / c_num_weights)));
+                TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX * 0.5 - 0.25;
                 cudaMemcpy(weights + c_weight_total, &random_value, sizeof(TYPE), cudaMemcpyHostToDevice);
                 c_weight_total++;
             }
 
-            TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX * 2 - 1;
-            random_value = random_value * (sqrt(8.0 / c_num_weights));
+            TYPE random_value = (TYPE)rand() / (TYPE)RAND_MAX * 0.5 - 0.25;
             neuron.bias = random_value;
 
             cudaMemcpy(neurons + c_neuron_total, &neuron, sizeof(Neuron), cudaMemcpyHostToDevice);
