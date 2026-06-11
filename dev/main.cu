@@ -5,7 +5,6 @@
 #include "convolution.h"
 #include "dropout.h"
 #include "mlp.h"
-#include "mnist.h"
 #include "nn.h"
 #include "pooling.h"
 #include "relu.h"
@@ -20,12 +19,6 @@
 
 int main() {
     printf("Hello, CUDA!\n");
-
-    MNIST_Image* dataset;
-    load_mnist_dataset("mnist/train-images.idx3-ubyte", "mnist/train-labels.idx1-ubyte", &dataset, DATASET_SIZE);
-
-    MNIST_Image* test_dataset;
-    load_mnist_dataset("mnist/t10k-images.idx3-ubyte", "mnist/t10k-labels.idx1-ubyte", &test_dataset, TEST_DATASET_SIZE);
 
     Layer* layers = (Layer*)malloc(sizeof(*layers) * 13);
 
@@ -55,17 +48,18 @@ int main() {
 
     create_nn(&nn);
 
+    /*
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);
 
         int correct_predictions = 0;
         for(int i = 0; i < TEST_DATASET_SIZE; i++) {
-            call_nn(&nn, test_dataset[i].pixels, 0);
+            // call_nn(&nn, test_dataset[i].pixels, 0);
             DATA_TYPE output[10];
             cudaMemcpy(output, nn.layers[nn.num_layers - 1].output.d1.output, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
             DATA_TYPE label[10];
-            cudaMemcpy(label, test_dataset[i].label, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+            // cudaMemcpy(label, test_dataset[i].label, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
             int predicted_label = 0;
             DATA_TYPE max_output = output[0];
@@ -96,8 +90,8 @@ int main() {
         for(int i = 0; i < DATASET_SIZE - BATCH_SIZE; i += BATCH_SIZE) {
             zero_grads_nn(&nn);
             for(int j = 0; j < BATCH_SIZE; j++) {
-                call_nn(&nn, dataset[i + j].pixels, 1);
-                grad_nn(&nn, dataset[i + j].label);
+                // call_nn(&nn, dataset[i + j].pixels, 1);
+                // grad_nn(&nn, dataset[i + j].label);
                 if((i + j) % 10000 == 0) {
                     printf("Processed %d samples\n", i + j);
                 }
@@ -107,6 +101,7 @@ int main() {
         save_nn(&nn, "model.data");
         
     }
+    */
 
     return 0;
 }
