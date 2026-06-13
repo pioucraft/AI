@@ -2,17 +2,16 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
-#include "convolution.h"
 #include "dropout.h"
 #include "mlp.h"
 #include "nn.h"
-#include "pooling.h"
 #include "relu.h"
 #include "tanh.h"
 #include "utils.h"
+#include "../btc/btc.h"
 
 #define NUM_CYCLES 100
-#define DATASET_SIZE 60000
+#define DATASET_SIZE 3000
 #define TEST_DATASET_SIZE 10000
 #define BATCH_SIZE 64
 #define LEARNING_RATE 5e-2
@@ -22,13 +21,15 @@ int main() {
 
     Layer* layers = (Layer*)malloc(sizeof(*layers) * 8);
 
-    create_mlp_layer(&layers[0], 24 * 5, 256);
-    create_relu_layer(&layers[1], 256);
-    create_mlp_layer(&layers[2], 256, 256);
-    create_relu_layer(&layers[3], 256);
-    create_mlp_layer(&layers[4], 256, 128);
-    create_relu_layer(&layers[5], 128);
-    create_mlp_layer(&layers[6], 128, 1);
+    create_mlp_layer(&layers[0], 24 * 5 * 5, 1024);
+    create_relu_layer(&layers[1], 1024);
+    create_dropout_layer(&layers[2], 1024, 0.5f);
+
+    create_mlp_layer(&layers[3], 1024, 512);
+    create_relu_layer(&layers[4], 512);
+    create_dropout_layer(&layers[5], 512, 0.25f);
+
+    create_mlp_layer(&layers[6], 512, 1);
     create_tanh_layer(&layers[7], 1);
 
     NN nn = {
@@ -38,12 +39,18 @@ int main() {
 
     create_nn(&nn);
 
+    DATA_TYPE* dataset;
+    DATA_TYPE* test_dataset;
+    load_btc_datapoints("./btc/BTCUSDT_1h.csv", &dataset, DATASET_SIZE);
+
+
+    /*
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);
 
         int correct_predictions = 0;
         for(int i = 0; i < TEST_DATASET_SIZE; i++) {
-            call_nn(&nn, test_dataset[i].pixels, 0);
+            call_nn(&nn, test_dataset + i * 5, 0);
             DATA_TYPE output[10];
             cudaMemcpy(output, nn.layers[nn.num_layers - 1].output.d1.output, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
@@ -90,6 +97,7 @@ int main() {
         save_nn(&nn, "model.data");
         
     }
+    */
 
     return 0;
 }

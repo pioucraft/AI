@@ -6,14 +6,14 @@
 #include "btc.h"
 #include "../dev/utils.h"
 
-int load_btc_datapoints(const char* dataset_path, BTC_Datapoint** dataset, int num_datapoints) {
+int load_btc_datapoints(const char* dataset_path, DATA_TYPE** dataset, int num_datapoints) {
     FILE* file = fopen(dataset_path, "r");
     if(file == NULL) {
         fprintf(stderr, "Error opening file: %s\n", dataset_path);
         return -1;
     }
 
-    *dataset = (BTC_Datapoint*)malloc(sizeof(BTC_Datapoint) * num_datapoints);
+    cudaMalloc(&dataset, num_datapoints * 5 * sizeof(DATA_TYPE));
 
     char buffer[4096];
     int read_bytes = 0;
@@ -29,15 +29,19 @@ int load_btc_datapoints(const char* dataset_path, BTC_Datapoint** dataset, int n
     
     int i = 0;
 
-    while(strtok_r(NULL, "\n", &save_line) != NULL) {
+    printf("Creating neural network...\n");
+    while(i < num_datapoints) {
+        strtok_r(NULL, "\n", &save_line);
+        printf("%d %s\n", i, line);
         char* save_token;
-        BTC_Datapoint dp;
         // Add a + 1 to skip the opening quote, keeps the closing quote but it's not a problem since atof will ignore it
-        dp.open = atof(strtok_r(line, ",", &save_token) + 1);
-        dp.high = atof(strtok_r(NULL, ",", &save_token) + 1);
-        dp.low = atof(strtok_r(NULL, ",", &save_token) + 1);
-        dp.close = atof(strtok_r(NULL, ",", &save_token) + 1);
-        dp.volume = atof(strtok_r(NULL, ",", &save_token) + 1);
+        DATA_TYPE value = atof(strtok_r(line, ",", &save_token) + 1);
+        cudaMemcpy(&((*dataset)[i * 5]), &value, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+        for(int j = 1; j < 5; j++) {
+            value = atof(strtok_r(NULL, ",", &save_token));
+            cudaMemcpy(&((*dataset)[i * 5 + j]), &value, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+        }
+        i++;
     }
 
     free(file_content);
