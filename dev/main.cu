@@ -8,7 +8,7 @@
 #include "relu.h"
 #include "tanh.h"
 #include "utils.h"
-#include "../btc/btc.h"
+#include "../language/language.h"
 
 #define NUM_CYCLES 100
 #define DATASET_SIZE 3000
@@ -39,10 +39,7 @@ int main() {
 
     create_nn(&nn);
 
-    DATA_TYPE* dataset;
-    DATA_TYPE* test_dataset;
-    load_btc_datapoints("./btc/BTCUSDT_1h.csv", &dataset, DATASET_SIZE);
-
+    load_language_dataset("language/tinyshakespeare.txt", 1e6);
 
     /*
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
