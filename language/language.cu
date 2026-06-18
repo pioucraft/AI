@@ -1,3 +1,4 @@
+#include <cuda_runtime_api.h>
 #include <stdio.h>
 
 #include "language.h"
@@ -33,7 +34,7 @@ int tokenizer(char c, char* tokens) {
     return -1;
 }
 
-int load_language_dataset(const char* dataset_path, int dataset_size) {
+int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE** dataset) {
     FILE* file = fopen(dataset_path, "r");
     if(file == NULL) {
         fprintf(stderr, "Error opening file: %s\n", dataset_path);
@@ -56,6 +57,16 @@ int load_language_dataset(const char* dataset_path, int dataset_size) {
     for(int i = 0; i < dataset_size; i++) {
         tokenized_data[i] = tokenizer(file_content[i], tokens);
     }
+
+    cudaMalloc(dataset, sizeof(DATA_TYPE) * dataset_size * strlen(tokens));
+    DATA_TYPE* host_dataset = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * dataset_size * strlen(tokens));
+    for(int i = 0; i < dataset_size; i++) {
+        for(int j = 0; j < strlen(tokens); j++) {
+            DATA_TYPE value = (tokenized_data[i] == j) ? 1.0f : -1.0f;
+            host_dataset[i * strlen(tokens) + j] = value;
+        }
+    }
+    cudaMemcpy(*dataset, host_dataset, sizeof(DATA_TYPE) * dataset_size * strlen(tokens), cudaMemcpyHostToDevice);
 
     return 0;
 }
