@@ -34,7 +34,11 @@ int tokenizer(char c, char* tokens) {
     return -1;
 }
 
-int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE** dataset) {
+int untokenizer(int token, char* tokens) {
+    return tokens[token];
+}
+
+int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE** dataset, char** tokens) {
     FILE* file = fopen(dataset_path, "r");
     if(file == NULL) {
         fprintf(stderr, "Error opening file: %s\n", dataset_path);
@@ -50,23 +54,22 @@ int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE*
         strncat(file_content, buffer, read_bytes);
     }
 
-    char* tokens;
-    create_tokenizer(file_content, &tokens, dataset_size);
+    create_tokenizer(file_content, tokens, dataset_size);
 
     int* tokenized_data = (int*)malloc(sizeof(int) * dataset_size);
     for(int i = 0; i < dataset_size; i++) {
-        tokenized_data[i] = tokenizer(file_content[i], tokens);
+        tokenized_data[i] = tokenizer(file_content[i], *tokens);
     }
 
-    cudaMalloc(dataset, sizeof(DATA_TYPE) * dataset_size * strlen(tokens));
-    DATA_TYPE* host_dataset = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * dataset_size * strlen(tokens));
+    cudaMalloc(dataset, sizeof(DATA_TYPE) * dataset_size * strlen(*tokens));
+    DATA_TYPE* host_dataset = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * dataset_size * strlen(*tokens));
     for(int i = 0; i < dataset_size; i++) {
-        for(int j = 0; j < strlen(tokens); j++) {
+        for(int j = 0; j < strlen(*tokens); j++) {
             DATA_TYPE value = (tokenized_data[i] == j) ? 1.0f : -1.0f;
-            host_dataset[i * strlen(tokens) + j] = value;
+            host_dataset[i * strlen(*tokens) + j] = value;
         }
     }
-    cudaMemcpy(*dataset, host_dataset, sizeof(DATA_TYPE) * dataset_size * strlen(tokens), cudaMemcpyHostToDevice);
+    cudaMemcpy(*dataset, host_dataset, sizeof(DATA_TYPE) * dataset_size * strlen(*tokens), cudaMemcpyHostToDevice);
 
     return 0;
 }

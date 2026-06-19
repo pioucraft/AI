@@ -20,7 +20,12 @@ int create_nn(NN* nn) {
             layer->input.d1.input = current_input;
             layer->input.d1.grads = current_input_grads;
 
-            cudaMalloc(&(current_input), layer->num_out_channels * layer->output.d1.output_size * sizeof(DATA_TYPE));
+            if(i == nn->num_layers - 1) {
+                cudaMallocManaged(&(current_input), layer->num_out_channels * layer->output.d1.output_size * sizeof(DATA_TYPE));
+            } else {
+                cudaMalloc(&(current_input), layer->num_out_channels * layer->output.d1.output_size * sizeof(DATA_TYPE));
+            }
+
             cudaMalloc(&(current_input_grads), layer->num_out_channels * layer->output.d1.output_size * sizeof(DATA_TYPE));
 
             layer->output.d1.output = current_input;

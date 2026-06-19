@@ -16,25 +16,39 @@
 #define BATCH_SIZE 1
 #define LEARNING_RATE 5e-3
 
-int test_nn(NN* nn, DATA_TYPE* dataset) {
+int test_unembed(DATA_TYPE* embedded) {
+    DATA_TYPE max = -1.0;
+    int predicted_token = -1;
+    for(int j = 0; j < 65; j++) {
+        if(embedded[j] > max) {
+            max = embedded[j];
+            predicted_token = j;
+        }
+    }
+
+    return predicted_token;
+}
+
+int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
     DATA_TYPE* input;
     cudaMallocManaged(&input, sizeof(DATA_TYPE) * 128 * 65);
     cudaMemcpy(input, dataset, sizeof(DATA_TYPE) * 32 * 65, cudaMemcpyHostToDevice);
+    printf("Testing NN...\n");
     for(int i = 0; i < 64; i++) {
-        call_nn(nn, input + i * 65, 1);
-        DATA_TYPE max = -1;
-        int predicted_token = 0;
-
-        DATA_TYPE* output = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * 65);
-        cudaMemcpy(nn->layers[3].output.d1.output, output, sizeof(DATA_TYPE) * 65, cudaMemcpyDeviceToHost);
-
+        call_nn(nn, input + i * 65, 0);
+        
+        int predicted_token = test_unembed(nn->layers[3].output.d1.output);
         for(int j = 0; j < 65; j++) {
-            if(output[j] > max) {
-                max = output[j];
-                predicted_token = j;
-            }
+            input[32 * 65 + i * 65 + j] = predicted_token == j ? 1.0 : -1.0;
         }
+        for(int j = 0; j < 32 + i; j++) {
+            int current_token = test_unembed(input + j * 65);
+            char current_char = untokenizer(current_token, tokens);
+            printf("%c", current_char);
+        }
+        printf("\n");
     }
+    return 0;
 }
 
 int main() {
@@ -59,8 +73,9 @@ int main() {
     create_nn(&nn);
 
     DATA_TYPE* dataset;
+    char* tokens;
     printf("Loading dataset...\n");
-    load_language_dataset("language/tinyshakespeare.txt", DATASET_SIZE, &dataset);
+    load_language_dataset("language/tinyshakespeare.txt", DATASET_SIZE, &dataset, &tokens);
 
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);
@@ -72,8 +87,8 @@ int main() {
             call_nn(&nn, dataset + i * 65, 1);
             grad_nn(&nn, dataset + (i + 1) * 65);
             if(i % 10000 == 0) {
+                test_nn(&nn, dataset, tokens);
                 printf("Processed %d samples\n", i);
-                test_nn(&nn, dataset);
             };
             update_nn(&nn, learning_rate / BATCH_SIZE);
         }
