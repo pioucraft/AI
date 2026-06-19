@@ -38,7 +38,7 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
     for(int i = 0; i < 64; i++) {
         call_nn(nn, input + i * 65, 0);
         
-        int predicted_token = test_unembed(nn->layers[3].output.d1.output);
+        int predicted_token = test_unembed(nn->layers[4].output.d1.output);
         for(int j = 0; j < 65; j++) {
             input[32 * 65 + i * 65 + j] = predicted_token == j ? 1.0 : -1.0;
         }
@@ -62,7 +62,7 @@ int main() {
 
     create_mlp_layer(&layers[0], 65 * 32, 32 * 16); // 32 context length
     create_relu_layer(&layers[1], 32 * 16);
-    create_dropout_layer(&layers[2], 32 * 16, 0.25);
+    create_dropout_layer(&layers[2], 32 * 16, 0.1);
 
     create_mlp_layer(&layers[3], 32 * 16, 65);
     create_tanh_layer(&layers[4], 65);

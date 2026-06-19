@@ -53,6 +53,12 @@ int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE*
         file_content = (char*)realloc(file_content, read_bytes + strlen(file_content) + 1);
         strncat(file_content, buffer, read_bytes);
     }
+    
+    for(int i = 0; i < strlen(file_content); i++) {
+        if(file_content[i] == ' ') {
+            file_content[i] = '_';
+        }
+    }
 
     create_tokenizer(file_content, tokens, dataset_size);
 
