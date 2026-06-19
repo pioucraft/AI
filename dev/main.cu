@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 
+#include "dropout.h"
 #include "mlp.h"
 #include "nn.h"
 #include "relu.h"
@@ -13,8 +14,8 @@
 
 #define NUM_CYCLES 100
 #define DATASET_SIZE 1e6
-#define BATCH_SIZE 1
-#define LEARNING_RATE 5e-3
+#define BATCH_SIZE 64
+#define LEARNING_RATE 1e-3
 
 int test_unembed(DATA_TYPE* embedded) {
     DATA_TYPE max = -1.0;
@@ -44,6 +45,7 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
         for(int j = 0; j < 32 + i; j++) {
             int current_token = test_unembed(input + j * 65);
             char current_char = untokenizer(current_token, tokens);
+            if(j == 32) printf("...");
             printf("%c", current_char);
         }
         printf("\n");
@@ -54,30 +56,63 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
 int main() {
     printf("Hello, CUDA!\n");
 
-    Layer* layers = (Layer*)malloc(sizeof(*layers) * 4);
+    Layer* layers = (Layer*)malloc(sizeof(*layers) * 5);
 
     int tokens_size = 65; // Number of unique tokens in the dataset
 
-    create_mlp_layer(&layers[0], 65 * 32, 32 * 16); // 64 context length
+    create_mlp_layer(&layers[0], 65 * 32, 32 * 16); // 32 context length
     create_relu_layer(&layers[1], 32 * 16);
+    create_dropout_layer(&layers[2], 32 * 16, 0.25);
 
-    create_mlp_layer(&layers[2], 32 * 16, 65);
-    create_tanh_layer(&layers[3], 65);
+    create_mlp_layer(&layers[3], 32 * 16, 65);
+    create_tanh_layer(&layers[4], 65);
 
 
     NN nn = {
-        .num_layers = 4,
+        .num_layers = 5,
         .layers = layers
     };
 
     create_nn(&nn);
+    // load_nn(&nn, "model.data");
 
     DATA_TYPE* dataset;
     char* tokens;
     printf("Loading dataset...\n");
     load_language_dataset("language/tinyshakespeare.txt", DATASET_SIZE, &dataset, &tokens);
 
-    for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
+    for (int cycle = 0; cycle < NUM_CYCLES; cycle++) {
+        printf("Cycle %d\n", cycle);
+
+        DATA_TYPE learning_rate =
+            LEARNING_RATE * (1.0f - (DATA_TYPE)cycle / NUM_CYCLES);
+
+        int train_size = DATASET_SIZE - 65; // keep your original limit
+
+        for (int batch_start = 0; batch_start < train_size; batch_start += BATCH_SIZE) {
+            int batch_end = batch_start + BATCH_SIZE;
+            if (batch_end > train_size) batch_end = train_size;
+
+            int current_batch_size = batch_end - batch_start;
+
+            zero_grads_nn(&nn);
+
+            for (int i = batch_start; i < batch_end; i++) {
+                call_nn(&nn, dataset + i * 65, 1);
+                grad_nn(&nn, dataset + (i + 32) * 65);
+
+                if (i % 10000 == 0) {
+                    test_nn(&nn, dataset, tokens);
+                    printf("Processed %d samples\n", i);
+                    save_nn(&nn, "model.data");
+                }
+            }
+
+            update_nn(&nn, learning_rate / current_batch_size);
+        }
+    }    
+
+    /*for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);
 
         DATA_TYPE learning_rate = LEARNING_RATE * (1.0f - (float)cycle / NUM_CYCLES);
@@ -85,16 +120,16 @@ int main() {
         for(int i = 0; i < DATASET_SIZE - 65; i++) { // - 64 for context length and -1 for output
             zero_grads_nn(&nn);
             call_nn(&nn, dataset + i * 65, 1);
-            grad_nn(&nn, dataset + (i + 1) * 65);
+            grad_nn(&nn, dataset + (i + 32) * 65);
             if(i % 10000 == 0) {
                 test_nn(&nn, dataset, tokens);
                 printf("Processed %d samples\n", i);
+                save_nn(&nn, "model.data");
             };
             update_nn(&nn, learning_rate / BATCH_SIZE);
         }
-        save_nn(&nn, "model.data");
         
-    }
+    }*/
 
     return 0;
 }
