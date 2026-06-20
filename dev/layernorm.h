@@ -8,6 +8,7 @@
 
 int create_layernorm_layer(Layer* layer, int input_size);
 
+__global__ void layernorm_forward_zero_variance_mean(Layer layer);
 __global__ void layernorm_forward(Layer layer);
 __global__ void layernorm_forward_mean(Layer layer);
 __global__ void layernorm_forward_variance(Layer layer);

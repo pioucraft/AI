@@ -112,8 +112,11 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
                 num_inputs *= layer.input.tensor.tensor_dimensions[j];
             }
             int num_blocks = num_inputs / NUM_THREADS + 1;
+            layernorm_forward_zero_variance_mean<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
             layernorm_forward_mean<<<num_blocks, NUM_THREADS>>>(layer);
             layernorm_forward_variance<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
             layernorm_forward<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
         }
