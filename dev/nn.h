@@ -7,6 +7,7 @@
 #define LAYER_TYPE_RELU 4
 #define LAYER_TYPE_TANH 5
 #define LAYER_TYPE_DROPOUT 6
+#define LAYER_TYPE_LAYERNORM 7
 
 #include "utils.h"
 

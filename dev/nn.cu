@@ -9,6 +9,7 @@
 #include "relu.h"
 #include "tanh.h"
 #include "utils.h"
+#include "layernorm.h"
 
 int create_nn(NN* nn) {
     DATA_TYPE* current_input = NULL;
@@ -39,6 +40,17 @@ int create_nn(NN* nn) {
 
             layer->output.d2.output = current_input;
             layer->output.d2.grads = current_input_grads;
+        } else if(layer->layer_type == LAYER_TYPE_LAYERNORM) { // tensor input
+            layer->input.tensor.input = current_input;
+            layer->input.tensor.grads = current_input_grads;
+
+            int input_size = layer->input.tensor.input_size;
+
+            cudaMalloc(&(current_input), layer->num_out_channels * input_size * sizeof(DATA_TYPE));
+            cudaMalloc(&(current_input_grads), layer->num_out_channels * input_size * sizeof(DATA_TYPE));
+
+            layer->output.tensor.output = current_input;
+            layer->output.tensor.grads = current_input_grads;
         }
     }
 
@@ -60,6 +72,8 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
         nn->layers[0].input.d1.input = input;
     } else if(nn->layers[0].layer_type == LAYER_TYPE_POOLING || nn->layers[0].layer_type == LAYER_TYPE_CONVOLUTION) { // 2d input and 2d output
         nn->layers[0].input.d2.input = input;
+    } else if(nn->layers[0].layer_type == LAYER_TYPE_LAYERNORM) { // tensor input
+        nn->layers[0].input.tensor.input = input;
     }
 
     for(int i = 0; i < nn->num_layers; i++) {
@@ -91,6 +105,17 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
             dropout_forward<<<num_blocks, NUM_THREADS>>>(layer, run_dropout);
             cudaDeviceSynchronize();
+        } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
+
+            int num_inputs = 1;
+            for(int j = 0; j < layer.input.tensor.tensor_rank; j++) {
+                num_inputs *= layer.input.tensor.tensor_dimensions[j];
+            }
+            int num_blocks = num_inputs / NUM_THREADS + 1;
+            layernorm_forward_mean<<<num_blocks, NUM_THREADS>>>(layer);
+            layernorm_forward_variance<<<num_blocks, NUM_THREADS>>>(layer);
+            layernorm_forward<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
         }
     }
 
@@ -115,6 +140,20 @@ __global__ void zero_grads_layer_2d_output(Layer layer) {
     }
 }
 
+__global__ void zero_grads_layer_tensor_output(Layer layer) {
+    int output_idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int output_size = 1;
+    for(int i = 0; i < layer.output.tensor.tensor_rank; i++) {
+        output_size *= layer.output.tensor.tensor_dimensions[i];
+    }
+    output_size *= layer.num_out_channels;
+
+    if(output_idx < output_size) {
+        layer.output.tensor.grads[output_idx] = (DATA_TYPE)0.0;
+    }
+}
+
 int zero_grads_nn(NN* nn) {
     for(int i = 0; i < nn->num_layers; i++) {
         Layer layer = nn->layers[i];
@@ -124,6 +163,15 @@ int zero_grads_nn(NN* nn) {
         } else if(layer.layer_type == LAYER_TYPE_POOLING || layer.layer_type == LAYER_TYPE_CONVOLUTION) { // 2d input and 2d output
             int num_blocks = layer.output.d2.output_dimensions * layer.output.d2.output_dimensions * layer.num_out_channels / NUM_THREADS + 1;
             zero_grads_layer_2d_output<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) { // tensor input and tensor output
+            int output_size = 1;
+            for(int j = 0; j < layer.output.tensor.tensor_rank; j++) {
+                output_size *= layer.output.tensor.tensor_dimensions[j];
+            }
+            output_size *= layer.num_out_channels;
+
+            int num_blocks = output_size / NUM_THREADS + 1;
+            zero_grads_layer_tensor_output<<<num_blocks, NUM_THREADS>>>(layer);
         }
 
         if(layer.layer_type == LAYER_TYPE_MLP) {
@@ -133,6 +181,7 @@ int zero_grads_nn(NN* nn) {
             int num_blocks = layer.layer.convolution_layer.filters_num * layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions / NUM_THREADS + 1;
             zero_grads_convolution_layer<<<num_blocks, NUM_THREADS>>>(layer);
         }
+        // TODO : add zero_grads for layernorm
     }
 
     cudaDeviceSynchronize();
@@ -206,6 +255,14 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             }
             int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
             grad_dropout_layer<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
+            if(layer.input.d1.grads != NULL) {
+                int num_blocks = layer.input.d1.input_size / NUM_THREADS + 1;
+                zero_input_grads_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
+                cudaDeviceSynchronize();
+            }
+            int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
+            grad_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
         }
         cudaDeviceSynchronize();
     }

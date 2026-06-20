@@ -3,6 +3,7 @@
 
 #define DATA_TYPE float
 #define NUM_THREADS 256
+#define TENSOR_MAX_RANK 4
 
 #include <curand_kernel.h>
 
@@ -37,6 +38,17 @@ typedef struct Dropout_Layer {
     unsigned char* mask;
 } Dropout_Layer;
 
+typedef struct Layernorm_Layer {
+    DATA_TYPE* gains;
+    DATA_TYPE* biases;
+
+    DATA_TYPE* gain_grads;
+    DATA_TYPE* bias_grads;
+
+    DATA_TYPE* means;
+    DATA_TYPE* variances;
+} Layernorm_Layer;
+
 typedef struct Layer {
     int layer_type;
 
@@ -54,6 +66,14 @@ typedef struct Layer {
             DATA_TYPE* input;
             DATA_TYPE* grads;
         } d2;
+        struct {
+            int tensor_rank;
+            int tensor_dimensions[TENSOR_MAX_RANK];
+            int input_size;
+
+            DATA_TYPE* input;
+            DATA_TYPE* grads;
+        } tensor;
     } input;
 
     union {
@@ -67,6 +87,14 @@ typedef struct Layer {
             DATA_TYPE* output;
             DATA_TYPE* grads;
         } d2;
+        struct {
+            int tensor_rank;
+            int tensor_dimensions[TENSOR_MAX_RANK];
+            int output_size;
+
+            DATA_TYPE* output;
+            DATA_TYPE* grads;
+        } tensor;
     } output;
 
     union {
@@ -74,6 +102,7 @@ typedef struct Layer {
         Pooling_Layer pooling_layer;
         Convolution_Layer convolution_layer;
         Dropout_Layer dropout_layer;
+        Layernorm_Layer layernorm_layer;
     } layer;
 } Layer;
 
