@@ -266,6 +266,8 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             }
             int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
             grad_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+            grad_layernorm_layer_step_two<<<num_blocks, NUM_THREADS>>>(layer);
         }
         cudaDeviceSynchronize();
     }

@@ -48,6 +48,9 @@ typedef struct Layernorm_Layer {
     DATA_TYPE* means;
     DATA_TYPE* variances;
 
+    DATA_TYPE* mean_grads;
+    DATA_TYPE* variance_grads;
+
     DATA_TYPE* normalized_values;
 } Layernorm_Layer;
 

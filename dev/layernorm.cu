@@ -40,7 +40,14 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
     cudaMalloc(&means, sizeof(DATA_TYPE) * tensor_dimensions[0]);
     cudaMalloc(&variances, sizeof(DATA_TYPE) * tensor_dimensions[0]);
 
+    DATA_TYPE* mean_grads;
+    DATA_TYPE* variance_grads;
+
+    cudaMalloc(&mean_grads, sizeof(DATA_TYPE) * tensor_dimensions[0]);
+    cudaMalloc(&variance_grads, sizeof(DATA_TYPE) * tensor_dimensions[0]);
+
     DATA_TYPE* normalized_values;
+
     cudaMalloc(&normalized_values, input_size * sizeof(DATA_TYPE));
 
     *layer = (Layer){
@@ -70,7 +77,10 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
                 .means = means,
                 .variances = variances,
 
-                .normalized_values = normalized_values
+                .mean_grads = mean_grads,
+                .variance_grads = variance_grads,
+
+                .normalized_values = normalized_values,
             }
         }
     };
@@ -177,9 +187,13 @@ __global__ void grad_layernorm_layer(Layer layer) {
         DATA_TYPE grad_normalized = grad_output * gain;
 
         DATA_TYPE grad_input_through_normalized = grad_normalized / sqrt(variance + EPSILON);
+        atomicAdd(&(layer.input.tensor.grads[idx]), grad_input_through_normalized);
 
         DATA_TYPE grad_mean = -grad_normalized / sqrt(variance + EPSILON);
-        DATA_TYPE grad_input_through_mean = grad_mean / vector_size;
+        atomicAdd(&(layer.layer.layernorm_layer.mean_grads[vector_idx]), grad_mean);
+
+        DATA_TYPE grad_variance = 0;
+        atomicAdd(&(layer.layer.layernorm_layer.variance_grads[vector_idx]), grad_variance);
 
 
         // TODO : Finish implementing this and move what can be moved to another function that will run on less threads and then the data is saved in there and don't forget to zero the values if using atomicAdd and stuff for them instead of just '='
@@ -187,6 +201,31 @@ __global__ void grad_layernorm_layer(Layer layer) {
 }
 
 __global__ void grad_layernorm_layer_step_two(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(idx >= layer.input.tensor.input_size) {
+        return;
+    }
+
+    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_idx = idx / vector_size;
+
+    DATA_TYPE mean = layer.layer.layernorm_layer.means[vector_idx];
+    DATA_TYPE variance = layer.layer.layernorm_layer.variances[vector_idx];
+    DATA_TYPE gain = layer.layer.layernorm_layer.gains[idx];
+    DATA_TYPE bias = layer.layer.layernorm_layer.biases[idx];
+    DATA_TYPE normalized_value = layer.layer.layernorm_layer.normalized_values[idx];
+
+    if(layer.input.tensor.grads != NULL) {
+        DATA_TYPE grad_input_through_mean = layer.layer.layernorm_layer.mean_grads[vector_idx] / vector_size;
+        atomicAdd(&(layer.input.tensor.grads[idx]), grad_input_through_mean);
+
+        DATA_TYPE grad_input_through_variance = 0;
+        atomicAdd(&(layer.input.tensor.grads[idx]), grad_input_through_variance);
+
+
+        // TODO : Finish implementing this and move what can be moved to another function that will run on less threads and then the data is saved in there and don't forget to zero the values if using atomicAdd and stuff for them instead of just '='
+    }
 
 }
 
