@@ -16,5 +16,6 @@ __global__ void layernorm_forward_variance(Layer layer);
 __global__ void zero_input_grads_layernorm_layer(Layer layer);
 
 __global__ void grad_layernorm_layer(Layer layer);
+__global__ void grad_layernorm_layer_step_two(Layer layer);
 
 #endif

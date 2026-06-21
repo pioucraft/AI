@@ -181,11 +181,13 @@ __global__ void grad_layernorm_layer(Layer layer) {
         DATA_TYPE grad_mean = -grad_normalized / sqrt(variance + EPSILON);
         DATA_TYPE grad_input_through_mean = grad_mean / vector_size;
 
-        DATA_TYPE grad_variance = 
-
 
         // TODO : Finish implementing this and move what can be moved to another function that will run on less threads and then the data is saved in there and don't forget to zero the values if using atomicAdd and stuff for them instead of just '='
     }
+}
+
+__global__ void grad_layernorm_layer_step_two(Layer layer) {
+
 }
 
 // TODO : Implement layernorm zero grads, grads, update, save, load make sure its grads are zeroed when needed like for MLPs.. .take inspiration from mlp.cu mainly...
