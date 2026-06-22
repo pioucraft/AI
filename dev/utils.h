@@ -54,6 +54,12 @@ typedef struct Layernorm_Layer {
     DATA_TYPE* normalized_values;
 } Layernorm_Layer;
 
+typedef struct Softmax_Layer {
+    DATA_TYPE temperature;
+    DATA_TYPE* exp_values;
+    DATA_TYPE* sums_exp_values;
+} Softmax_Layer;
+
 typedef struct Layer {
     int layer_type;
 
@@ -108,6 +114,7 @@ typedef struct Layer {
         Convolution_Layer convolution_layer;
         Dropout_Layer dropout_layer;
         Layernorm_Layer layernorm_layer;
+        Softmax_Layer softmax_layer;
     } layer;
 } Layer;
 

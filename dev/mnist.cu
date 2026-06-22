@@ -10,6 +10,7 @@
 #include "nn.h"
 #include "pooling.h"
 #include "relu.h"
+#include "softmax.h"
 #include "tanh.h"
 #include "utils.h"
 
@@ -50,7 +51,7 @@ int main() {
     create_dropout_layer(&(layers[c_layer++]), 128, 0.5f);
 
     create_mlp_layer(&(layers[c_layer++]), 2, (int[]){1, 128}, 10);
-    create_tanh_layer(&(layers[c_layer++]), 10);
+    create_softmax_layer(&(layers[c_layer++]), 2, (int[]){1, 10}, 1.0f);
 
     NN nn = {
         .num_layers = num_layers,
