@@ -1,4 +1,5 @@
 #include <cuda_runtime.h>
+#include <stdio.h>
 #include <device_atomic_functions.h>
 
 #include "nn.h"
@@ -264,6 +265,32 @@ __global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate) {
 
     layer.layer.layernorm_layer.gains[idx] -= learning_rate * layer.layer.layernorm_layer.gain_grads[idx];
     layer.layer.layernorm_layer.biases[idx] -= learning_rate * layer.layer.layernorm_layer.bias_grads[idx];
+}
+
+int save_layernorm_layer(Layer layer, FILE* file) {
+    DATA_TYPE* host_gains = (DATA_TYPE*)malloc(layer.input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE));
+    DATA_TYPE* host_biases = (DATA_TYPE*)malloc(layer.input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE));
+
+    cudaMemcpy(host_gains, layer.layer.layernorm_layer.gains, layer.input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_biases, layer.layer.layernorm_layer.biases, layer.input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+
+    fwrite(host_gains, sizeof(DATA_TYPE), layer.input.tensor.tensor_dimensions[1], file);
+    fwrite(host_biases, sizeof(DATA_TYPE), layer.input.tensor.tensor_dimensions[1], file);
+
+    return 0;
+}
+
+int load_layernorm_layer(Layer* layer, FILE* file) {
+    DATA_TYPE* host_gains = (DATA_TYPE*)malloc(layer->input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE));
+    DATA_TYPE* host_biases = (DATA_TYPE*)malloc(layer->input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE));
+
+    fread(host_gains, sizeof(DATA_TYPE), layer->input.tensor.tensor_dimensions[1], file);
+    fread(host_biases, sizeof(DATA_TYPE), layer->input.tensor.tensor_dimensions[1], file);
+
+    cudaMemcpy(layer->layer.layernorm_layer.gains, host_gains, layer->input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+    cudaMemcpy(layer->layer.layernorm_layer.biases, host_biases, layer->input.tensor.tensor_dimensions[1] * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+
+    return 0;
 }
 
 // TODO : Implement save and load

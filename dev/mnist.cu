@@ -58,6 +58,7 @@ int main() {
     };
 
     create_nn(&nn);
+    // load_nn(&nn, "model.data");
 
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);

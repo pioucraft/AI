@@ -2,6 +2,7 @@
 #define LAYERNORM_H
 
 #include <cuda_runtime.h>
+#include <stdio.h>
 
 #include "nn.h"
 #include "utils.h"
@@ -19,5 +20,8 @@ __global__ void grad_layernorm_layer(Layer layer);
 __global__ void grad_layernorm_layer_step_two(Layer layer);
 
 __global__ void zero_grads_layernorm_layer(Layer layer);
+
+int save_layernorm_layer(Layer layer, FILE* file);
+int load_layernorm_layer(Layer* layer, FILE* file);
 
 #endif
