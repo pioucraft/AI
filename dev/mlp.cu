@@ -6,6 +6,14 @@
 #include "nn.h"
 #include "utils.h"
 
+__global__ void bias_forward(DATA_TYPE* outputs, DATA_TYPE* biases, int total_elements, int output_feature_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(idx < total_elements) {
+        outputs[idx] = biases[idx % output_feature_size];
+    }
+}
+
 int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK], int output_feature_size) {
     int batch_size = tensor_dimensions[0];
     int input_feature_size = tensor_dimensions[1];

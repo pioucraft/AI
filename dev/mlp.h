@@ -9,6 +9,8 @@
 
 int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK], int output_feature_size);
 
+__global__ void bias_forward(DATA_TYPE* outputs, DATA_TYPE* biases, int total_elements, int output_feature_size);
+
 __global__ void mlp_forward(Layer layer);
 
 __global__ void zero_grads_mlp_layer(Layer layer);

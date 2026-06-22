@@ -64,14 +64,6 @@ int create_nn(NN* nn) {
     return 0;
 }
 
-__global__ void bias_forward(DATA_TYPE* outputs, DATA_TYPE* biases, int total_elements, int output_feature_size) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if(idx < total_elements) {
-        outputs[idx] = biases[idx % output_feature_size];
-    }
-}
-
 int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
     if(nn->layers[0].layer_type == LAYER_TYPE_MLP || nn->layers[0].layer_type == LAYER_TYPE_LAYERNORM) {
         nn->layers[0].input.tensor.input = input;
@@ -90,6 +82,7 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
 
             int num_blocks_bias = layer.output.tensor.output_size / NUM_THREADS + 1;
             bias_forward<<<num_blocks_bias, NUM_THREADS>>>(layer.output.tensor.output, layer.layer.mlp_layer.biases, layer.output.tensor.output_size, output_feature_size);
+            cudaDeviceSynchronize();
 
             int num_blocks = batch_size * input_feature_size * output_feature_size / NUM_THREADS + 1;
             mlp_forward<<<num_blocks, NUM_THREADS>>>(layer);
