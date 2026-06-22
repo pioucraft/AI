@@ -17,10 +17,12 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
         input_size *= tensor_dimensions[i];
     }
 
-    cudaMalloc(&gains, input_size * sizeof(DATA_TYPE));
-    cudaMalloc(&biases, input_size * sizeof(DATA_TYPE));
+    int gain_bias_size = input_size / tensor_dimensions[0];
 
-    for(int i = 0; i < input_size; i++) {
+    cudaMalloc(&gains, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMalloc(&biases, gain_bias_size * sizeof(DATA_TYPE));
+
+    for(int i = 0; i < gain_bias_size; i++) {
         DATA_TYPE gain = (DATA_TYPE)1.0;
         DATA_TYPE bias = (DATA_TYPE)0.0;
         
@@ -31,8 +33,8 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
     DATA_TYPE* gain_grads;
     DATA_TYPE* bias_grads;
 
-    cudaMalloc(&gain_grads, input_size * sizeof(DATA_TYPE));
-    cudaMalloc(&bias_grads, input_size * sizeof(DATA_TYPE));
+    cudaMalloc(&gain_grads, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMalloc(&bias_grads, gain_bias_size * sizeof(DATA_TYPE));
 
     DATA_TYPE* means;
     DATA_TYPE* variances;
@@ -140,10 +142,11 @@ __global__ void layernorm_forward(Layer layer) {
 
     int vector_size = layer.input.tensor.tensor_dimensions[0];
     int vector_idx = idx / vector_size;
+    int element_idx = idx % vector_size;
     DATA_TYPE mean = layer.layer.layernorm_layer.means[vector_idx];
     DATA_TYPE variance = layer.layer.layernorm_layer.variances[vector_idx];
-    DATA_TYPE gain = layer.layer.layernorm_layer.gains[idx];
-    DATA_TYPE bias = layer.layer.layernorm_layer.biases[idx];
+    DATA_TYPE gain = layer.layer.layernorm_layer.gains[element_idx];
+    DATA_TYPE bias = layer.layer.layernorm_layer.biases[element_idx];
     
     DATA_TYPE normalized_value = (layer.input.tensor.input[idx] - mean) / sqrt(variance + EPSILON);
     layer.layer.layernorm_layer.normalized_values[idx] = normalized_value;
@@ -161,6 +164,10 @@ __global__ void zero_input_grads_layernorm_layer(Layer layer) {
     }
 
     layer.input.tensor.grads[idx] = (DATA_TYPE)0.0;
+    if(idx % layer.input.tensor.tensor_dimensions[0] == 0) {
+        layer.layer.layernorm_layer.mean_grads[idx / layer.input.tensor.tensor_dimensions[0]] = (DATA_TYPE)0.0;
+        layer.layer.layernorm_layer.variance_grads[idx / layer.input.tensor.tensor_dimensions[0]] = (DATA_TYPE)0.0;
+    }
 }
 
 __global__ void grad_layernorm_layer(Layer layer) {
@@ -172,15 +179,16 @@ __global__ void grad_layernorm_layer(Layer layer) {
 
     int vector_size = layer.input.tensor.tensor_dimensions[0];
     int vector_idx = idx / vector_size;
+    int element_idx = idx % vector_size;
 
     DATA_TYPE mean = layer.layer.layernorm_layer.means[vector_idx];
     DATA_TYPE variance = layer.layer.layernorm_layer.variances[vector_idx];
-    DATA_TYPE gain = layer.layer.layernorm_layer.gains[idx];
-    DATA_TYPE bias = layer.layer.layernorm_layer.biases[idx];
+    DATA_TYPE gain = layer.layer.layernorm_layer.gains[element_idx];
+    DATA_TYPE bias = layer.layer.layernorm_layer.biases[element_idx];
     DATA_TYPE normalized_value = layer.layer.layernorm_layer.normalized_values[idx];
 
-    atomicAdd(&(layer.layer.layernorm_layer.bias_grads[idx]), layer.output.tensor.grads[idx]);
-    atomicAdd(&(layer.layer.layernorm_layer.gain_grads[idx]), layer.output.tensor.grads[idx] * normalized_value);
+    atomicAdd(&(layer.layer.layernorm_layer.bias_grads[element_idx]), layer.output.tensor.grads[idx]);
+    atomicAdd(&(layer.layer.layernorm_layer.gain_grads[element_idx]), layer.output.tensor.grads[idx] * normalized_value);
 
     if(layer.input.tensor.grads != NULL) {
         DATA_TYPE grad_output = layer.output.tensor.grads[idx];
@@ -192,11 +200,8 @@ __global__ void grad_layernorm_layer(Layer layer) {
         DATA_TYPE grad_mean = -grad_normalized / sqrt(variance + EPSILON);
         atomicAdd(&(layer.layer.layernorm_layer.mean_grads[vector_idx]), grad_mean);
 
-        DATA_TYPE grad_variance = 0;
+        DATA_TYPE grad_variance = grad_normalized * (layer.input.tensor.input[idx] - mean) * -0.5 * pow(variance + EPSILON, -1.5);
         atomicAdd(&(layer.layer.layernorm_layer.variance_grads[vector_idx]), grad_variance);
-
-
-        // TODO : Finish implementing this and move what can be moved to another function that will run on less threads and then the data is saved in there and don't forget to zero the values if using atomicAdd and stuff for them instead of just '='
     }
 }
 
@@ -209,24 +214,56 @@ __global__ void grad_layernorm_layer_step_two(Layer layer) {
 
     int vector_size = layer.input.tensor.tensor_dimensions[0];
     int vector_idx = idx / vector_size;
+    int element_idx = idx % vector_size;
 
     DATA_TYPE mean = layer.layer.layernorm_layer.means[vector_idx];
     DATA_TYPE variance = layer.layer.layernorm_layer.variances[vector_idx];
-    DATA_TYPE gain = layer.layer.layernorm_layer.gains[idx];
-    DATA_TYPE bias = layer.layer.layernorm_layer.biases[idx];
+    DATA_TYPE gain = layer.layer.layernorm_layer.gains[element_idx];
+    DATA_TYPE bias = layer.layer.layernorm_layer.biases[element_idx];
     DATA_TYPE normalized_value = layer.layer.layernorm_layer.normalized_values[idx];
 
     if(layer.input.tensor.grads != NULL) {
         DATA_TYPE grad_input_through_mean = layer.layer.layernorm_layer.mean_grads[vector_idx] / vector_size;
         atomicAdd(&(layer.input.tensor.grads[idx]), grad_input_through_mean);
 
-        DATA_TYPE grad_input_through_variance = 0;
+        DATA_TYPE grad_input_through_variance = layer.layer.layernorm_layer.variance_grads[vector_idx] * 2.0 * (layer.input.tensor.input[idx] - mean) / vector_size;
         atomicAdd(&(layer.input.tensor.grads[idx]), grad_input_through_variance);
-
-
-        // TODO : Finish implementing this and move what can be moved to another function that will run on less threads and then the data is saved in there and don't forget to zero the values if using atomicAdd and stuff for them instead of just '='
     }
 
 }
 
-// TODO : Implement layernorm zero grads, grads, update, save, load make sure its grads are zeroed when needed like for MLPs.. .take inspiration from mlp.cu mainly...
+__global__ void zero_grads_layernorm_layer(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(idx >= layer.input.tensor.input_size) {
+        return;
+    }
+
+    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_idx = idx / vector_size;
+    int element_idx = idx % layer.input.tensor.tensor_dimensions[0];
+
+    if(vector_idx == 0) {
+        layer.layer.layernorm_layer.gain_grads[element_idx] = (DATA_TYPE)0.0;
+        layer.layer.layernorm_layer.bias_grads[element_idx] = (DATA_TYPE)0.0;
+    }
+
+    if(element_idx == 0) {
+        layer.layer.layernorm_layer.mean_grads[vector_idx] = (DATA_TYPE)0.0;
+        layer.layer.layernorm_layer.variance_grads[vector_idx] = (DATA_TYPE)0.0;
+    }
+}
+
+__global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    if(idx >= vector_size) {
+        return;
+    }
+
+    layer.layer.layernorm_layer.gains[idx] -= learning_rate * layer.layer.layernorm_layer.gain_grads[idx];
+    layer.layer.layernorm_layer.biases[idx] -= learning_rate * layer.layer.layernorm_layer.bias_grads[idx];
+}
+
+// TODO : Implement save and load

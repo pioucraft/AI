@@ -6,7 +6,7 @@
 #include "nn.h"
 #include "utils.h"
 
-int create_layernorm_layer(Layer* layer, int input_size);
+int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK]);
 
 __global__ void layernorm_forward_zero_variance_mean(Layer layer);
 __global__ void layernorm_forward(Layer layer);
@@ -17,5 +17,7 @@ __global__ void zero_input_grads_layernorm_layer(Layer layer);
 
 __global__ void grad_layernorm_layer(Layer layer);
 __global__ void grad_layernorm_layer_step_two(Layer layer);
+
+__global__ void zero_grads_layernorm_layer(Layer layer);
 
 #endif

@@ -183,8 +183,10 @@ int zero_grads_nn(NN* nn) {
         } else if(layer.layer_type == LAYER_TYPE_CONVOLUTION) {
             int num_blocks = layer.layer.convolution_layer.filters_num * layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions / NUM_THREADS + 1;
             zero_grads_convolution_layer<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
+            int num_blocks = layer.input.tensor.tensor_dimensions[0] * layer.num_out_channels / NUM_THREADS + 1;
+            zero_grads_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
         }
-        // TODO : add zero_grads for layernorm
     }
 
     cudaDeviceSynchronize();

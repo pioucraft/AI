@@ -4,6 +4,7 @@
 
 #include "convolution.h"
 #include "dropout.h"
+#include "layernorm.h"
 #include "mlp.h"
 #include "../mnist/mnist.h"
 #include "nn.h"
@@ -27,29 +28,32 @@ int main() {
     MNIST_Image* test_dataset;
     load_mnist_dataset("mnist/t10k-images.idx3-ubyte", "mnist/t10k-labels.idx1-ubyte", &test_dataset, TEST_DATASET_SIZE);
 
-    Layer* layers = (Layer*)malloc(sizeof(*layers) * 13);
+    int num_layers = 14;
+    int c_layer = 0;
+    Layer* layers = (Layer*)malloc(sizeof(*layers) * num_layers);
 
     int multiplier = 32;
-    create_convolution_layer(&(layers[0]), 28, 26, 3, 1*multiplier, 1, 1*multiplier);
-    create_pooling_layer(&(layers[1]), 26, 13, 2, 1*multiplier);
-    create_relu_layer(&(layers[2]), 13*13*1*multiplier);
-    create_dropout_layer(&(layers[3]), 13*13*1*multiplier, 0.25f);
+    create_convolution_layer(&(layers[c_layer++]), 28, 26, 3, 1*multiplier, 1, 1*multiplier);
+    create_pooling_layer(&(layers[c_layer++]), 26, 13, 2, 1*multiplier);
+    create_relu_layer(&(layers[c_layer++]), 13*13*1*multiplier);
+    create_dropout_layer(&(layers[c_layer++]), 13*13*1*multiplier, 0.25f);
 
-    create_convolution_layer(&(layers[4]), 13, 10, 4, 2*multiplier, 1*multiplier, 2*multiplier);
-    create_pooling_layer(&(layers[5]), 10, 5, 2, 2*multiplier);
-    create_relu_layer(&(layers[6]), 5*5*2*multiplier);
-    create_dropout_layer(&(layers[7]), 5*5*2*multiplier, 0.25f);
+    create_convolution_layer(&(layers[c_layer++]), 13, 10, 4, 2*multiplier, 1*multiplier, 2*multiplier);
+    create_pooling_layer(&(layers[c_layer++]), 10, 5, 2, 2*multiplier);
+    create_relu_layer(&(layers[c_layer++]), 5*5*2*multiplier);
+    create_dropout_layer(&(layers[c_layer++]), 5*5*2*multiplier, 0.25f);
 
-    create_mlp_layer(&(layers[8]), 5*5*2*multiplier, 128);
-    create_relu_layer(&(layers[9]), 128);
-    create_dropout_layer(&(layers[10]), 128, 0.5f);
-    // create_relu_layer(&(layers[8]), 128);
+    create_mlp_layer(&(layers[c_layer++]), 5*5*2*multiplier, 128);
 
-    create_mlp_layer(&(layers[11]), 128, 10);
-    create_tanh_layer(&(layers[12]), 10);
+    create_layernorm_layer(&(layers[c_layer++]), 1, (int[]){1, 128});
+    create_relu_layer(&(layers[c_layer++]), 128);
+    create_dropout_layer(&(layers[c_layer++]), 128, 0.5f);
+
+    create_mlp_layer(&(layers[c_layer++]), 128, 10);
+    create_tanh_layer(&(layers[c_layer++]), 10);
 
     NN nn = {
-        .num_layers = 13,
+        .num_layers = num_layers,
         .layers = layers
     };
 
