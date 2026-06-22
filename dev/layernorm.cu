@@ -111,7 +111,7 @@ __global__ void layernorm_forward_mean(Layer layer) {
         return;
     }
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     int vector_idx = idx / vector_size;
     atomicAdd(&(layer.layer.layernorm_layer.means[vector_idx]), layer.input.tensor.input[idx] / vector_size);
 }
@@ -124,7 +124,7 @@ __global__ void layernorm_forward_variance(Layer layer) {
         return;
     }
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     int vector_idx = idx / vector_size;
     DATA_TYPE mean = layer.layer.layernorm_layer.means[vector_idx];
     DATA_TYPE value = layer.input.tensor.input[idx] - mean;
@@ -140,7 +140,7 @@ __global__ void layernorm_forward(Layer layer) {
         return;
     }
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     int vector_idx = idx / vector_size;
     int element_idx = idx % vector_size;
     DATA_TYPE mean = layer.layer.layernorm_layer.means[vector_idx];
@@ -164,9 +164,9 @@ __global__ void zero_input_grads_layernorm_layer(Layer layer) {
     }
 
     layer.input.tensor.grads[idx] = (DATA_TYPE)0.0;
-    if(idx % layer.input.tensor.tensor_dimensions[0] == 0) {
-        layer.layer.layernorm_layer.mean_grads[idx / layer.input.tensor.tensor_dimensions[0]] = (DATA_TYPE)0.0;
-        layer.layer.layernorm_layer.variance_grads[idx / layer.input.tensor.tensor_dimensions[0]] = (DATA_TYPE)0.0;
+    if(idx % layer.input.tensor.tensor_dimensions[1] == 0) {
+        layer.layer.layernorm_layer.mean_grads[idx / layer.input.tensor.tensor_dimensions[1]] = (DATA_TYPE)0.0;
+        layer.layer.layernorm_layer.variance_grads[idx / layer.input.tensor.tensor_dimensions[1]] = (DATA_TYPE)0.0;
     }
 }
 
@@ -177,7 +177,7 @@ __global__ void grad_layernorm_layer(Layer layer) {
         return;
     }
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     int vector_idx = idx / vector_size;
     int element_idx = idx % vector_size;
 
@@ -212,7 +212,7 @@ __global__ void grad_layernorm_layer_step_two(Layer layer) {
         return;
     }
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     int vector_idx = idx / vector_size;
     int element_idx = idx % vector_size;
 
@@ -239,9 +239,9 @@ __global__ void zero_grads_layernorm_layer(Layer layer) {
         return;
     }
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     int vector_idx = idx / vector_size;
-    int element_idx = idx % layer.input.tensor.tensor_dimensions[0];
+    int element_idx = idx % layer.input.tensor.tensor_dimensions[1];
 
     if(vector_idx == 0) {
         layer.layer.layernorm_layer.gain_grads[element_idx] = (DATA_TYPE)0.0;
@@ -257,7 +257,7 @@ __global__ void zero_grads_layernorm_layer(Layer layer) {
 __global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    int vector_size = layer.input.tensor.tensor_dimensions[0];
+    int vector_size = layer.input.tensor.tensor_dimensions[1];
     if(idx >= vector_size) {
         return;
     }

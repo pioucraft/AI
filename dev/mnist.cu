@@ -45,7 +45,7 @@ int main() {
 
     create_mlp_layer(&(layers[c_layer++]), 5*5*2*multiplier, 128);
 
-    create_layernorm_layer(&(layers[c_layer++]), 1, (int[]){1, 128});
+    create_layernorm_layer(&(layers[c_layer++]), 2, (int[]){1, 128});
     create_relu_layer(&(layers[c_layer++]), 128);
     create_dropout_layer(&(layers[c_layer++]), 128, 0.5f);
 
