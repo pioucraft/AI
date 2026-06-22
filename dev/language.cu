@@ -59,10 +59,10 @@ int main() {
 
     int tokens_size = 65; // Number of unique tokens in the dataset
 
-    create_mlp_layer(&layers[0], 65 * 32, 32 * 16); // 32 context length
+    create_mlp_layer(&layers[0], 2, (int[]){1, 65 * 32}, 32 * 16); // 32 context length
     create_relu_layer(&layers[1], 32 * 16);
 
-    create_mlp_layer(&layers[2], 32 * 16, 65);
+    create_mlp_layer(&layers[2], 2, (int[]){1, 32 * 16}, 65);
     create_tanh_layer(&layers[3], 65);
 
 

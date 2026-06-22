@@ -7,7 +7,7 @@
 #include "nn.h"
 #include "utils.h"
 
-int create_mlp_layer(Layer* layer, int input_size, int output_size);
+int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK], int output_feature_size);
 
 __global__ void mlp_forward(Layer layer);
 

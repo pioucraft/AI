@@ -6,20 +6,26 @@
 #include "nn.h"
 #include "utils.h"
 
-int create_mlp_layer(Layer* layer, int input_size, int output_size) {
+int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK], int output_feature_size) {
+    int batch_size = tensor_dimensions[0];
+    int input_feature_size = tensor_dimensions[1];
+
+    int input_size = batch_size * input_feature_size;
+    int output_size = batch_size * output_feature_size;
+
     DATA_TYPE* weights;
     DATA_TYPE* biases;
 
-    cudaMalloc(&weights, input_size * output_size * sizeof(DATA_TYPE));
-    cudaMalloc(&biases, output_size * sizeof(DATA_TYPE));
+    cudaMalloc(&weights, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    cudaMalloc(&biases, output_feature_size * sizeof(DATA_TYPE));
 
-    DATA_TYPE deviation = sqrt(2.0 / (input_size));
-    for(int i = 0; i < input_size * output_size; i++) {
+    DATA_TYPE deviation = sqrt(2.0 / (input_feature_size));
+    for(int i = 0; i < input_feature_size * output_feature_size; i++) {
         DATA_TYPE weight = (DATA_TYPE)((DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation);
         cudaMemcpy(weights + i, &weight, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
     }
 
-    for(int i = 0; i < output_size; i++) {
+    for(int i = 0; i < output_feature_size; i++) {
         DATA_TYPE bias = (DATA_TYPE)((DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation);
         cudaMemcpy(biases + i, &bias, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
     }
@@ -27,20 +33,24 @@ int create_mlp_layer(Layer* layer, int input_size, int output_size) {
     DATA_TYPE* weight_grads;
     DATA_TYPE* bias_grads;
 
-    cudaMalloc(&weight_grads, input_size * output_size * sizeof(DATA_TYPE));
-    cudaMalloc(&bias_grads, output_size * sizeof(DATA_TYPE));
+    cudaMalloc(&weight_grads, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    cudaMalloc(&bias_grads, output_feature_size * sizeof(DATA_TYPE));
 
-    *layer = {
+    int output_tensor_dimensions[TENSOR_MAX_RANK] = {batch_size, output_feature_size, 0, 0};
+
+    *layer = (Layer){
         .layer_type = LAYER_TYPE_MLP,
         .num_in_channels = 1,
         .num_out_channels = 1,
         .input = {
-            .d1 = {
+            .tensor = {
+                .tensor_rank = 2,
                 .input_size = input_size
             }
         },
         .output = {
-            .d1 = {
+            .tensor = {
+                .tensor_rank = 2,
                 .output_size = output_size
             }
         },
@@ -54,108 +64,154 @@ int create_mlp_layer(Layer* layer, int input_size, int output_size) {
             }
         }
     };
+    layer->input.tensor.tensor_dimensions[0] = batch_size;
+    layer->input.tensor.tensor_dimensions[1] = input_feature_size;
+    layer->output.tensor.tensor_dimensions[0] = batch_size;
+    layer->output.tensor.tensor_dimensions[1] = output_feature_size;
+
     return 0;
 }
 
 __global__ void mlp_forward(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int neuron_idx = idx / layer.input.d1.input_size;
-    int input_idx = idx % layer.input.d1.input_size;
-    int weight_idx = idx;
 
-    if(neuron_idx >= layer.output.d1.output_size) {
+    int batch_size = layer.input.tensor.tensor_dimensions[0];
+    int input_feature_size = layer.input.tensor.tensor_dimensions[1];
+    int output_feature_size = layer.output.tensor.tensor_dimensions[1];
+
+    int inner_size = input_feature_size * output_feature_size;
+
+    if(idx >= batch_size * inner_size) {
         return;
     }
 
-    atomicAdd(&(layer.output.d1.output[neuron_idx]), layer.input.d1.input[input_idx] * layer.layer.mlp_layer.weights[weight_idx]);
+    int batch_idx = idx / inner_size;
+    int inner_idx = idx % inner_size;
+    int neuron_idx = inner_idx / input_feature_size;
+    int input_idx = inner_idx % input_feature_size;
+
+    atomicAdd(&(layer.output.tensor.output[batch_idx * output_feature_size + neuron_idx]),
+              layer.input.tensor.input[batch_idx * input_feature_size + input_idx] * layer.layer.mlp_layer.weights[inner_idx]);
 }
 
 
 __global__ void zero_grads_mlp_layer(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    int neuron_idx = idx / layer.input.d1.input_size;
-    int input_idx = idx % layer.input.d1.input_size;
-    int weight_idx = idx;
+    int input_feature_size = layer.input.tensor.tensor_dimensions[1];
+    int output_feature_size = layer.output.tensor.tensor_dimensions[1];
 
-    if(idx >= layer.input.d1.input_size * layer.output.d1.output_size) {
+    int total_weights = input_feature_size * output_feature_size;
+
+    if(idx >= total_weights) {
         return;
     }
+
+    int neuron_idx = idx / input_feature_size;
+    int input_idx = idx % input_feature_size;
 
     if(input_idx == 0) {
         layer.layer.mlp_layer.bias_grads[neuron_idx] = (DATA_TYPE)0.0;
     }
-    layer.layer.mlp_layer.weight_grads[weight_idx] = (DATA_TYPE)0.0;
+    layer.layer.mlp_layer.weight_grads[idx] = (DATA_TYPE)0.0;
 }
 
 __global__ void zero_input_grads_mlp_layer(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if(idx >= layer.input.d1.input_size) {
+    if(idx >= layer.input.tensor.input_size) {
         return;
     }
 
-    layer.input.d1.grads[idx] = (DATA_TYPE)0.0;
+    layer.input.tensor.grads[idx] = (DATA_TYPE)0.0;
 }
 
 __global__ void grad_mlp_layer(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int neuron_idx = idx / layer.input.d1.input_size;
-    int input_idx = idx % layer.input.d1.input_size;
-    int weight_idx = idx;
 
-    if(idx >= layer.input.d1.input_size * layer.output.d1.output_size) {
+    int batch_size = layer.input.tensor.tensor_dimensions[0];
+    int input_feature_size = layer.input.tensor.tensor_dimensions[1];
+    int output_feature_size = layer.output.tensor.tensor_dimensions[1];
+
+    int inner_size = input_feature_size * output_feature_size;
+
+    if(idx >= batch_size * inner_size) {
         return;
     }
 
-    if(input_idx == 0) {
-        layer.layer.mlp_layer.bias_grads[neuron_idx] += layer.output.d1.grads[neuron_idx];
-    }
-    layer.layer.mlp_layer.weight_grads[weight_idx] += layer.output.d1.grads[neuron_idx] * layer.input.d1.input[input_idx];
+    int batch_idx = idx / inner_size;
+    int inner_idx = idx % inner_size;
+    int neuron_idx = inner_idx / input_feature_size;
+    int input_idx = inner_idx % input_feature_size;
 
-    if(layer.input.d1.grads != NULL) {
-        atomicAdd(&(layer.input.d1.grads[input_idx]), layer.output.d1.grads[neuron_idx] * layer.layer.mlp_layer.weights[weight_idx]);
+    if(input_idx == 0) {
+        atomicAdd(&(layer.layer.mlp_layer.bias_grads[neuron_idx]),
+                  layer.output.tensor.grads[batch_idx * output_feature_size + neuron_idx]);
+    }
+    atomicAdd(&(layer.layer.mlp_layer.weight_grads[inner_idx]),
+              layer.output.tensor.grads[batch_idx * output_feature_size + neuron_idx] * layer.input.tensor.input[batch_idx * input_feature_size + input_idx]);
+
+    if(layer.input.tensor.grads != NULL) {
+        atomicAdd(&(layer.input.tensor.grads[batch_idx * input_feature_size + input_idx]),
+                  layer.output.tensor.grads[batch_idx * output_feature_size + neuron_idx] * layer.layer.mlp_layer.weights[inner_idx]);
     }
 }
 
 __global__ void update_mlp_layer(Layer layer, DATA_TYPE learning_rate) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int neuron_idx = idx / layer.input.d1.input_size;
-    int input_idx = idx % layer.input.d1.input_size;
-    int weight_idx = idx;
 
-    if(idx >= layer.input.d1.input_size * layer.output.d1.output_size) {
+    int input_feature_size = layer.input.tensor.tensor_dimensions[1];
+    int output_feature_size = layer.output.tensor.tensor_dimensions[1];
+
+    int total_weights = input_feature_size * output_feature_size;
+
+    if(idx >= total_weights) {
         return;
     }
+
+    int neuron_idx = idx / input_feature_size;
+    int input_idx = idx % input_feature_size;
 
     if(input_idx == 0) {
         layer.layer.mlp_layer.biases[neuron_idx] -= learning_rate * layer.layer.mlp_layer.bias_grads[neuron_idx];
     }
-    layer.layer.mlp_layer.weights[weight_idx] -= learning_rate * layer.layer.mlp_layer.weight_grads[weight_idx];
+    layer.layer.mlp_layer.weights[idx] -= learning_rate * layer.layer.mlp_layer.weight_grads[idx];
 }
 
 int save_mlp_layer(Layer layer, FILE* file) {
-    DATA_TYPE* host_weights = (DATA_TYPE*)malloc(layer.input.d1.input_size * layer.output.d1.output_size * sizeof(DATA_TYPE));
-    DATA_TYPE* host_biases = (DATA_TYPE*)malloc(layer.output.d1.output_size * sizeof(DATA_TYPE));
+    int input_feature_size = layer.input.tensor.tensor_dimensions[1];
+    int output_feature_size = layer.output.tensor.tensor_dimensions[1];
 
-    cudaMemcpy(host_weights, layer.layer.mlp_layer.weights, layer.input.d1.input_size * layer.output.d1.output_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
-    cudaMemcpy(host_biases, layer.layer.mlp_layer.biases, layer.output.d1.output_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+    DATA_TYPE* host_weights = (DATA_TYPE*)malloc(input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_biases = (DATA_TYPE*)malloc(output_feature_size * sizeof(DATA_TYPE));
 
-    fwrite(host_weights, sizeof(DATA_TYPE), layer.input.d1.input_size * layer.output.d1.output_size, file);
-    fwrite(host_biases, sizeof(DATA_TYPE), layer.output.d1.output_size, file);
+    cudaMemcpy(host_weights, layer.layer.mlp_layer.weights, input_feature_size * output_feature_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_biases, layer.layer.mlp_layer.biases, output_feature_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+
+    fwrite(host_weights, sizeof(DATA_TYPE), input_feature_size * output_feature_size, file);
+    fwrite(host_biases, sizeof(DATA_TYPE), output_feature_size, file);
+
+    free(host_weights);
+    free(host_biases);
 
     return 0;
 }
 
 int load_mlp_layer(Layer* layer, FILE* file) {
-    DATA_TYPE* host_weights = (DATA_TYPE*)malloc(layer->input.d1.input_size * layer->output.d1.output_size * sizeof(DATA_TYPE));
-    DATA_TYPE* host_biases = (DATA_TYPE*)malloc(layer->output.d1.output_size * sizeof(DATA_TYPE));
+    int input_feature_size = layer->input.tensor.tensor_dimensions[1];
+    int output_feature_size = layer->output.tensor.tensor_dimensions[1];
 
-    fread(host_weights, sizeof(DATA_TYPE), layer->input.d1.input_size * layer->output.d1.output_size, file);
-    fread(host_biases, sizeof(DATA_TYPE), layer->output.d1.output_size, file);
+    DATA_TYPE* host_weights = (DATA_TYPE*)malloc(input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_biases = (DATA_TYPE*)malloc(output_feature_size * sizeof(DATA_TYPE));
 
-    cudaMemcpy(layer->layer.mlp_layer.weights, host_weights, layer->input.d1.input_size * layer->output.d1.output_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
-    cudaMemcpy(layer->layer.mlp_layer.biases, host_biases, layer->output.d1.output_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+    fread(host_weights, sizeof(DATA_TYPE), input_feature_size * output_feature_size, file);
+    fread(host_biases, sizeof(DATA_TYPE), output_feature_size, file);
+
+    cudaMemcpy(layer->layer.mlp_layer.weights, host_weights, input_feature_size * output_feature_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+    cudaMemcpy(layer->layer.mlp_layer.biases, host_biases, output_feature_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+
+    free(host_weights);
+    free(host_biases);
 
     return 0;
 }
