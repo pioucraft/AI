@@ -302,6 +302,8 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             }
             int num_blocks = layer.output.tensor.output_size / NUM_THREADS + 1;
             grad_softmax_layer_step_1<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+            grad_softmax_layer_step_2<<<num_blocks, NUM_THREADS>>>(layer);
         }
 
         cudaDeviceSynchronize();

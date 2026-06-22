@@ -58,6 +58,7 @@ typedef struct Softmax_Layer {
     DATA_TYPE temperature;
     DATA_TYPE* exp_values;
     DATA_TYPE* sums_exp_values;
+    DATA_TYPE* grad_sums;
 } Softmax_Layer;
 
 typedef struct Layer {

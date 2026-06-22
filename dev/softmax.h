@@ -19,6 +19,7 @@ __global__ void zero_input_grads_softmax_layer(Layer layer);
 __global__ void grad_softmax_layer(Layer layer);
 
 __global__ void grad_softmax_layer_step_1(Layer layer);
+__global__ void grad_softmax_layer_step_2(Layer layer);
 /*
 __global__ void layernorm_forward_zero_variance_mean(Layer layer);
 __global__ void layernorm_forward(Layer layer);
