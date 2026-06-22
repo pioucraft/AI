@@ -7,6 +7,7 @@
 #include "nn.h"
 #include "pooling.h"
 #include "relu.h"
+#include "softmax.h"
 #include "tanh.h"
 #include "utils.h"
 #include "layernorm.h"
@@ -65,7 +66,7 @@ int create_nn(NN* nn) {
 }
 
 int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
-    if(nn->layers[0].layer_type == LAYER_TYPE_MLP || nn->layers[0].layer_type == LAYER_TYPE_LAYERNORM) {
+    if(nn->layers[0].layer_type == LAYER_TYPE_MLP || nn->layers[0].layer_type == LAYER_TYPE_LAYERNORM || nn->layers[0].layer_type == LAYER_TYPE_SOFTMAX) {
         nn->layers[0].input.tensor.input = input;
     } else if(nn->layers[0].layer_type == LAYER_TYPE_RELU || nn->layers[0].layer_type == LAYER_TYPE_TANH || nn->layers[0].layer_type == LAYER_TYPE_DROPOUT) { // 1d input and 1d output
         nn->layers[0].input.d1.input = input;
@@ -117,9 +118,20 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             layernorm_forward_zero_variance_mean<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
             layernorm_forward_mean<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
             layernorm_forward_variance<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
             layernorm_forward<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+        } else if(layer.layer_type == LAYER_TYPE_SOFTMAX) {
+            int num_blocks_zero_exp_sums = layer.output.tensor.tensor_dimensions[0] / NUM_THREADS + 1;
+            softmax_zero_exp_sums<<<num_blocks_zero_exp_sums, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks = layer.output.tensor.output_size / NUM_THREADS + 1;
+            softmax_compute_exps<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+            softmax_compute_outputs<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
         }
     }
@@ -197,15 +209,25 @@ int zero_grads_nn(NN* nn) {
 __global__ void grad_error(Layer output_layer, DATA_TYPE* expected_output) {
     // We assume that the output layer is always a tanh activation function
     int output_idx = threadIdx.x;
-    DATA_TYPE error_grad = 2 * (output_layer.output.d1.output[output_idx] - expected_output[output_idx]);
-    output_layer.output.d1.grads[output_idx] = error_grad;
+    DATA_TYPE error_grad;
+    if(output_layer.layer_type == LAYER_TYPE_SOFTMAX) {
+        error_grad = 2 * (output_layer.output.tensor.output[output_idx] - expected_output[output_idx]);
+    output_layer.output.tensor.grads[output_idx] = error_grad;
+    } else if(output_layer.layer_type == LAYER_TYPE_TANH) {
+        error_grad = 2 * (output_layer.output.d1.output[output_idx] - expected_output[output_idx]);
+        output_layer.output.d1.grads[output_idx] = error_grad;
+    }
 }
 
 int grad_nn(NN* nn, DATA_TYPE* expected_output) {
     for(int i = nn->num_layers - 1; i >= 0; i--) {
         Layer layer = nn->layers[i];
         if(i == nn->num_layers - 1) {
-            grad_error<<<1, layer.output.d1.output_size>>>(layer, expected_output);
+            if(nn->layers[i].layer_type == LAYER_TYPE_SOFTMAX) {
+                grad_error<<<1, layer.output.tensor.output_size>>>(layer, expected_output);
+            } else if(nn->layers[i].layer_type == LAYER_TYPE_TANH) {
+                grad_error<<<1, layer.output.d1.output_size>>>(layer, expected_output);
+            }
         }
         cudaDeviceSynchronize();
 
@@ -272,7 +294,16 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             grad_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
             grad_layernorm_layer_step_two<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_SOFTMAX) {
+            if(layer.input.tensor.grads != NULL) {
+                int num_blocks = layer.input.tensor.input_size / NUM_THREADS + 1;
+                zero_input_grads_softmax_layer<<<num_blocks, NUM_THREADS>>>(layer);
+                cudaDeviceSynchronize();
+            }
+            int num_blocks = layer.output.tensor.output_size / NUM_THREADS + 1;
+            grad_softmax_layer_step_1<<<num_blocks, NUM_THREADS>>>(layer);
         }
+
         cudaDeviceSynchronize();
     }
 

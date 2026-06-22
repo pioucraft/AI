@@ -9,6 +9,16 @@
 
 int create_softmax_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK], DATA_TYPE temperature);
 
+__global__ void softmax_zero_exp_sums(Layer layer);
+__global__ void softmax_compute_exps(Layer layer);
+__global__ void softmax_compute_outputs(Layer layer);
+
+
+__global__ void zero_input_grads_softmax_layer(Layer layer);
+
+__global__ void grad_softmax_layer(Layer layer);
+
+__global__ void grad_softmax_layer_step_1(Layer layer);
 /*
 __global__ void layernorm_forward_zero_variance_mean(Layer layer);
 __global__ void layernorm_forward(Layer layer);

@@ -52,6 +52,7 @@ int main() {
 
     create_mlp_layer(&(layers[c_layer++]), 2, (int[]){1, 128}, 10);
     create_softmax_layer(&(layers[c_layer++]), 2, (int[]){1, 10}, 1.0f);
+    // create_tanh_layer(&(layers[c_layer++]), 10);
 
     NN nn = {
         .num_layers = num_layers,
@@ -68,7 +69,7 @@ int main() {
         for(int i = 0; i < TEST_DATASET_SIZE; i++) {
             call_nn(&nn, test_dataset[i].pixels, 0);
             DATA_TYPE output[10];
-            cudaMemcpy(output, nn.layers[nn.num_layers - 1].output.d1.output, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+            cudaMemcpy(output, nn.layers[nn.num_layers - 1].output.tensor.output, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
 
             DATA_TYPE label[10];
             cudaMemcpy(label, test_dataset[i].label, 10 * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
