@@ -87,8 +87,8 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
             }
         }
     };
-    memcpy(layer->input.tensor.tensor_dimensions, tensor_dimensions, TENSOR_MAX_RANK * sizeof(int));
-    memcpy(layer->output.tensor.tensor_dimensions, tensor_dimensions, TENSOR_MAX_RANK * sizeof(int));
+    memcpy(layer->input.tensor.tensor_dimensions, tensor_dimensions, 2 * sizeof(int));
+    memcpy(layer->output.tensor.tensor_dimensions, tensor_dimensions, 2 * sizeof(int));
 
     return 0;
 }

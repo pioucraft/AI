@@ -10,6 +10,7 @@
 #include "tanh.h"
 #include "utils.h"
 #include "../language/language.h"
+#include "weightstensormultiplication.h"
 
 #define NUM_CYCLES 100
 #define DATASET_SIZE 1e6
@@ -55,24 +56,28 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
 int main() {
     printf("Hello, CUDA!\n");
 
-    Layer* layers = (Layer*)malloc(sizeof(*layers) * 4);
+    int layer_count = 5;
+    int current_layer = 0;
+    Layer* layers = (Layer*)malloc(sizeof(*layers) * layer_count);
 
     int tokens_size = 65; // Number of unique tokens in the dataset
 
-    create_mlp_layer(&layers[0], 2, (int[]){1, 65 * 32}, 32 * 16); // 32 context length
-    create_relu_layer(&layers[1], 32 * 16);
+    create_weightstensormultiplication(&layers[current_layer++], 2, (int[]){32, tokens_size}, 2, (int[]){tokens_size, 16});
+    create_mlp_layer(&layers[current_layer++], 2, (int[]){1, 32*16}, 16 * 16);
+    create_relu_layer(&layers[current_layer++], 16 * 16);
 
-    create_mlp_layer(&layers[2], 2, (int[]){1, 32 * 16}, 65);
-    create_tanh_layer(&layers[3], 65);
+    create_mlp_layer(&layers[current_layer++], 2, (int[]){1, 16 * 16}, 65);
+    create_tanh_layer(&layers[current_layer++], 65);
 
 
     NN nn = {
-        .num_layers = 4,
+        .num_layers = layer_count,
         .layers = layers
     };
 
     create_nn(&nn);
-    load_nn(&nn, "model.data");
+    // load_nn(&nn, "model.data");
+    printf("NN created with %d layers\n", nn.num_layers);
 
     DATA_TYPE* dataset;
     char* tokens;

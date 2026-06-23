@@ -8,10 +8,10 @@ read choice
 echo "Building the project..."
 case "$choice" in
   1)
-    nvcc -o main dev/utils.cu dev/nn.cu dev/mlp.cu dev/relu.cu dev/tanh.cu dev/pooling.cu dev/convolution.cu dev/mnist.cu dev/dropout.cu dev/layernorm.cu mnist/mnist.cu dev/softmax.cu --threads 4
+    nvcc -o main dev/utils.cu dev/nn.cu dev/mlp.cu dev/relu.cu dev/tanh.cu dev/pooling.cu dev/convolution.cu dev/mnist.cu dev/dropout.cu dev/layernorm.cu mnist/mnist.cu dev/softmax.cu dev/weightstensormultiplication.cu --threads 4
     ;;
   2)
-    nvcc -o main dev/utils.cu dev/nn.cu dev/mlp.cu dev/relu.cu dev/tanh.cu dev/pooling.cu dev/convolution.cu dev/dropout.cu dev/layernorm.cu language/language.cu dev/language.cu dev/softmax.cu --threads 4
+    nvcc -o main dev/utils.cu dev/nn.cu dev/mlp.cu dev/relu.cu dev/tanh.cu dev/pooling.cu dev/convolution.cu dev/dropout.cu dev/layernorm.cu language/language.cu dev/language.cu dev/softmax.cu dev/weightstensormultiplication.cu --threads 4
     ;;
   *)
     echo "Invalid choice. Exiting."
