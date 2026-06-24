@@ -61,6 +61,20 @@ typedef struct Softmax_Layer {
     DATA_TYPE* grad_sums;
 } Softmax_Layer;
 
+typedef struct Attention_Layer {
+    int context_length;
+    int embedding_size;
+    int query_key_value_size;
+
+    DATA_TYPE* query_weights;
+    DATA_TYPE* key_weights;
+    DATA_TYPE* value_weights;
+
+    DATA_TYPE* query_grads;
+    DATA_TYPE* key_grads;
+    DATA_TYPE* value_grads;
+} Attention_Layer;
+
 typedef struct Layer {
     int layer_type;
 
@@ -116,6 +130,7 @@ typedef struct Layer {
         Dropout_Layer dropout_layer;
         Layernorm_Layer layernorm_layer;
         Softmax_Layer softmax_layer;
+        Attention_Layer attention_layer;
     } layer;
 } Layer;
 

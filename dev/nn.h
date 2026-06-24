@@ -9,6 +9,7 @@
 #define LAYER_TYPE_DROPOUT 6
 #define LAYER_TYPE_LAYERNORM 7
 #define LAYER_TYPE_SOFTMAX 8
+#define LAYER_TYPE_ATTENTION 9
 
 #include "utils.h"
 

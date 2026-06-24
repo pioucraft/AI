@@ -18,7 +18,7 @@ int create_nn(NN* nn) {
 
     for(int i = 0; i < nn->num_layers; i++) {
         Layer* layer = &(nn->layers[i]);
-        if(layer->layer_type == LAYER_TYPE_MLP || layer->layer_type == LAYER_TYPE_LAYERNORM || layer->layer_type == LAYER_TYPE_SOFTMAX) {
+        if(layer->layer_type == LAYER_TYPE_MLP || layer->layer_type == LAYER_TYPE_LAYERNORM || layer->layer_type == LAYER_TYPE_SOFTMAX || layer->layer_type == LAYER_TYPE_ATTENTION) {
             layer->input.tensor.input = current_input;
             layer->input.tensor.grads = current_input_grads;
 

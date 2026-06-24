@@ -55,21 +55,18 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
 int main() {
     printf("Hello, CUDA!\n");
 
-    int layer_count = 4;
     int current_layer = 0;
-    Layer* layers = (Layer*)malloc(sizeof(*layers) * layer_count);
+    Layer* layers = (Layer*)malloc(sizeof(*layers) * 20); // Allocate memory for 20 layers
 
     int tokens_size = 65; // Number of unique tokens in the dataset
+    int context_length = 128; // Length of the context window
+    int embedding_size = 128; // Size of the embedding vector
 
-    create_mlp_layer(&layers[current_layer++], 2, (int[]){1, 32*16}, 16 * 16);
-    create_relu_layer(&layers[current_layer++], 16 * 16);
-
-    create_mlp_layer(&layers[current_layer++], 2, (int[]){1, 16 * 16}, 65);
-    create_tanh_layer(&layers[current_layer++], 65);
+    create_mlp_layer(&layers[current_layer++], 2, (int[]){context_length, tokens_size}, embedding_size);
 
 
     NN nn = {
-        .num_layers = layer_count,
+        .num_layers = current_layer,
         .layers = layers
     };
 
