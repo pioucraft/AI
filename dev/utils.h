@@ -61,14 +61,6 @@ typedef struct Softmax_Layer {
     DATA_TYPE* grad_sums;
 } Softmax_Layer;
 
-typedef struct Weightstensormultiplication_Layer {
-    DATA_TYPE* weights;
-    DATA_TYPE* weight_grads;
-
-    int weights_rank;
-    DATA_TYPE weights_dimensions[TENSOR_MAX_RANK];
-} Weightstensormultiplication_Layer;
-
 typedef struct Layer {
     int layer_type;
 
@@ -124,7 +116,6 @@ typedef struct Layer {
         Dropout_Layer dropout_layer;
         Layernorm_Layer layernorm_layer;
         Softmax_Layer softmax_layer;
-        Weightstensormultiplication_Layer weightstensormultiplication_layer;
     } layer;
 } Layer;
 

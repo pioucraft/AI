@@ -10,7 +10,6 @@
 #include "tanh.h"
 #include "utils.h"
 #include "../language/language.h"
-#include "weightstensormultiplication.h"
 
 #define NUM_CYCLES 100
 #define DATASET_SIZE 1e6
@@ -56,13 +55,12 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
 int main() {
     printf("Hello, CUDA!\n");
 
-    int layer_count = 5;
+    int layer_count = 4;
     int current_layer = 0;
     Layer* layers = (Layer*)malloc(sizeof(*layers) * layer_count);
 
     int tokens_size = 65; // Number of unique tokens in the dataset
 
-    create_weightstensormultiplication(&layers[current_layer++], 2, (int[]){32, tokens_size}, 2, (int[]){tokens_size, 16});
     create_mlp_layer(&layers[current_layer++], 2, (int[]){1, 32*16}, 16 * 16);
     create_relu_layer(&layers[current_layer++], 16 * 16);
 
