@@ -298,6 +298,8 @@ __global__ void grad_attention_layer_value_weighted_sum(Layer layer) {
     int idx_y = idx % layer.layer.attention_layer.embedding_size;
 
     if (idx < layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size) {
+        atomicAdd(&layer.input.tensor.grads[idx], layer.output.tensor.grads[idx]);
+
         int head_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
         
         for(int c_head = 0; c_head < layer.layer.attention_layer.num_heads; c_head++) {
@@ -351,4 +353,93 @@ __global__ void grad_attention_layer_softmax_step_2(Layer layer) {
 
     DATA_TYPE grad_through_sum = -output_value * grad_sum / temperature;
     atomicAdd(&layer.layer.attention_layer.attention_score_masked_grads[idx], grad_through_sum);
+}
+
+__global__ void grad_attention_layer_masking(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    if (idx >= total) return;
+
+    int head_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length;
+    int local_idx = idx % head_size;
+
+    int idx_x = local_idx / layer.layer.attention_layer.context_length;
+    int idx_y = local_idx % layer.layer.attention_layer.context_length;
+
+    if (idx_y <= idx_x) {
+        layer.layer.attention_layer.attention_score_grads[idx] = layer.layer.attention_layer.attention_score_masked_grads[idx];
+    }
+}
+
+__global__ void grad_attention_layer_scores(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    if (idx >= total) return;
+
+    int input_head_size = layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.context_length;
+    int output_head_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length;
+    int head_idx = idx / output_head_size;
+    int local_idx = idx % output_head_size;
+
+    int idx_x = local_idx / layer.layer.attention_layer.context_length;
+    int idx_y = local_idx % layer.layer.attention_layer.context_length;
+
+    for (int i = 0; i < layer.layer.attention_layer.query_key_size; i++) {
+        int query_idx = (idx_x * layer.layer.attention_layer.query_key_size + i) + input_head_size * head_idx;
+        int key_idx = (idx_y * layer.layer.attention_layer.query_key_size + i) + input_head_size * head_idx;
+
+        atomicAdd(&layer.layer.attention_layer.query_grads[query_idx], layer.layer.attention_layer.attention_score_grads[idx] * layer.layer.attention_layer.keys[key_idx]);
+        atomicAdd(&layer.layer.attention_layer.key_grads[key_idx], layer.layer.attention_layer.attention_score_grads[idx] * layer.layer.attention_layer.queries[query_idx]);
+    }
+}
+
+__global__ void grad_attention_layer_key_query(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+    if (idx >= total) return;
+
+    int input_head_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.context_length;
+    int output_head_size = layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.context_length;
+    int weight_head_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size;
+    int head_idx = idx / output_head_size;
+    int local_idx = idx % output_head_size;
+
+    int idx_x = local_idx / layer.layer.attention_layer.query_key_size;
+    int idx_y = local_idx % layer.layer.attention_layer.query_key_size;
+
+    for (int i = 0; i < layer.layer.attention_layer.embedding_size; i++) {
+        int input_idx = (idx_x * layer.layer.attention_layer.embedding_size + i);
+        int weight_idx = i * layer.layer.attention_layer.query_key_size + idx_y + weight_head_size * head_idx;
+
+        atomicAdd(&layer.layer.attention_layer.query_weight_grads[weight_idx], layer.layer.attention_layer.query_grads[idx] * layer.input.tensor.input[input_idx]);
+        atomicAdd(&layer.layer.attention_layer.key_weight_grads[weight_idx], layer.layer.attention_layer.key_grads[idx] * layer.input.tensor.input[input_idx]);
+        atomicAdd(&layer.input.tensor.grads[input_idx], layer.layer.attention_layer.query_grads[idx] * layer.layer.attention_layer.query_weights[weight_idx] + layer.layer.attention_layer.key_grads[idx] * layer.layer.attention_layer.key_weights[weight_idx]);
+    }
+}
+
+__global__ void grad_attention_layer_value(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+    if (idx >= total) return;
+
+    int input_head_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.context_length;
+    int output_head_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.context_length;
+    int weight_head_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size;
+    int head_idx = idx / output_head_size;
+    int local_idx = idx % output_head_size;
+
+    int idx_x = local_idx / layer.layer.attention_layer.embedding_size;
+    int idx_y = local_idx % layer.layer.attention_layer.embedding_size;
+
+    for (int i = 0; i < layer.layer.attention_layer.embedding_size; i++) {
+        int input_idx = (idx_x * layer.layer.attention_layer.embedding_size + i);
+        int weight_idx = i * layer.layer.attention_layer.embedding_size + idx_y + weight_head_size * head_idx;
+
+        atomicAdd(&layer.layer.attention_layer.value_weight_grads[weight_idx], layer.layer.attention_layer.value_grads[idx] * layer.input.tensor.input[input_idx]);
+        atomicAdd(&layer.input.tensor.grads[input_idx], layer.layer.attention_layer.value_grads[idx] * layer.layer.attention_layer.value_weights[weight_idx]);
+    }
 }
