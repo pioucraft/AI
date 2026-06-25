@@ -1,5 +1,6 @@
 #include <cuda_runtime_api.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "language.h"
 
@@ -35,6 +36,7 @@ int tokenizer(char c, char* tokens) {
 }
 
 int untokenizer(int token, char* tokens) {
+    if (token < 0 || token >= (int)strlen(tokens)) return '?';
     return tokens[token];
 }
 
@@ -71,7 +73,7 @@ int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE*
     DATA_TYPE* host_dataset = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * dataset_size * strlen(*tokens));
     for(int i = 0; i < dataset_size; i++) {
         for(int j = 0; j < strlen(*tokens); j++) {
-            DATA_TYPE value = (tokenized_data[i] == j) ? 1.0f : -1.0f;
+            DATA_TYPE value = (tokenized_data[i] == j) ? 1.0f : 0.0f;
             host_dataset[i * strlen(*tokens) + j] = value;
         }
     }

@@ -60,7 +60,7 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
         memmove(host_context, host_context + 65, sizeof(DATA_TYPE) * 127 * 65);
 
         for(int j = 0; j < 65; j++) {
-            host_context[127 * 65 + j] = predicted_token == j ? 1.0 : -1.0;
+            host_context[127 * 65 + j] = predicted_token == j ? 1.0 : 0.0;
         }
 
         cudaMemcpy(device_context, host_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyHostToDevice);

@@ -59,8 +59,8 @@ __global__ void softmax_compute_exps(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx < layer.input.tensor.input_size) {
-        int vector_idx = idx / layer.output.tensor.output_size;
-        int element_idx = idx % layer.output.tensor.output_size;
+        int feature_size = layer.output.tensor.tensor_dimensions[1];
+        int vector_idx = idx / feature_size;
 
         DATA_TYPE input_value = layer.input.tensor.input[idx];
         DATA_TYPE exp_value = expf(input_value / layer.layer.softmax_layer.temperature);
