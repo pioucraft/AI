@@ -20,7 +20,7 @@
 #define LEARNING_RATE 1e-4
 
 int test_unembed(DATA_TYPE* probs) {
-    DATA_TYPE max = -1.0;
+    DATA_TYPE max = 0.0;
     int predicted_token = -1;
     for(int j = 0; j < 65; j++) {
         if(probs[j] > max) {

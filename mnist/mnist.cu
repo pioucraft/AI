@@ -46,7 +46,7 @@ int load_mnist_dataset(const char* images_path, const char* labels_path, MNIST_I
 
         int label = labels_buffer[8 + i];
         for(int j = 0; j < 10; j++) {
-            c_label[j] = (DATA_TYPE)((j == label) ? 1.0f : -1.0f);
+            c_label[j] = (DATA_TYPE)((j == label) ? 1.0f : 0.0f);
         }
 
         cudaMalloc(&(c_image.pixels), 28 * 28 * sizeof(DATA_TYPE));
