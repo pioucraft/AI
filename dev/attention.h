@@ -21,11 +21,6 @@ __global__ void attention_softmax_compute_outputs(Layer layer);
 __global__ void attention_forward_value_weighted_sum(Layer layer);
 
 /*
-__global__ void layernorm_forward_zero_variance_mean(Layer layer);
-__global__ void layernorm_forward(Layer layer);
-__global__ void layernorm_forward_mean(Layer layer);
-__global__ void layernorm_forward_variance(Layer layer);
-
 __global__ void zero_input_grads_layernorm_layer(Layer layer);
 
 __global__ void grad_layernorm_layer(Layer layer);

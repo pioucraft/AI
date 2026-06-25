@@ -91,6 +91,10 @@ typedef struct Attention_Layer {
 
     DATA_TYPE* attention_percentages;
     DATA_TYPE* attention_percentage_grads;
+
+    DATA_TYPE* value_grads;
+    DATA_TYPE* query_grads;
+    DATA_TYPE* key_grads;
 } Attention_Layer;
 
 typedef struct Layer {

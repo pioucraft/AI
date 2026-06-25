@@ -67,6 +67,14 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
     cudaMalloc(&attention_percentages, context_length * context_length * num_heads * sizeof(DATA_TYPE));
     cudaMalloc(&attention_percentage_grads, context_length * context_length * num_heads * sizeof(DATA_TYPE));
 
+    DATA_TYPE* value_grads;
+    DATA_TYPE* query_grads;
+    DATA_TYPE* key_grads;
+
+    cudaMalloc(&value_grads, context_length * embedding_size * num_heads * sizeof(DATA_TYPE));
+    cudaMalloc(&query_grads, context_length * query_key_size * num_heads * sizeof(DATA_TYPE));
+    cudaMalloc(&key_grads, context_length * query_key_size * num_heads * sizeof(DATA_TYPE));
+
     *layer = (Layer){
         .layer_type = LAYER_TYPE_ATTENTION,
         .num_in_channels = 1,
@@ -280,4 +288,67 @@ __global__ void attention_forward_value_weighted_sum(Layer layer) {
             }
         }
     }
+}
+
+__global__ void grad_attention_layer_value_weighted_sum(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // Each idx is an output scalar
+
+    int idx_x = idx / layer.layer.attention_layer.embedding_size;
+    int idx_y = idx % layer.layer.attention_layer.embedding_size;
+
+    if (idx < layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size) {
+        int head_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
+        
+        for(int c_head = 0; c_head < layer.layer.attention_layer.num_heads; c_head++) {
+            int head_offset_percentage = c_head * layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length;
+            int head_offset_value = c_head * layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
+
+            for(int c_token = 0; c_token < layer.layer.attention_layer.context_length; c_token++) {
+                int percentage_idx = head_offset_percentage + idx_x * layer.layer.attention_layer.context_length + c_token;
+                int value_idx = head_offset_value + c_token * layer.layer.attention_layer.embedding_size + idx_y;
+
+                atomicAdd(&layer.layer.attention_layer.value_grads[value_idx], layer.layer.attention_layer.attention_percentages[percentage_idx] * layer.output.tensor.grads[idx]);
+                atomicAdd(&layer.layer.attention_layer.attention_percentage_grads[percentage_idx], layer.layer.attention_layer.values[value_idx] * layer.output.tensor.grads[idx]);
+            }
+        }
+    }
+}
+
+__global__ void grad_attention_layer_softmax_step_1(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    if (idx >= total) return;
+
+    int vector_idx = idx / layer.layer.attention_layer.context_length;
+
+    DATA_TYPE grad_output = layer.layer.attention_layer.attention_percentage_grads[idx];
+    DATA_TYPE output_value = layer.layer.attention_layer.attention_percentages[idx];
+    DATA_TYPE exp_value = layer.layer.attention_layer.softmax_exp_values[idx];
+    DATA_TYPE sum_exp_value = layer.layer.attention_layer.softmax_sums_exp_values[vector_idx];
+    DATA_TYPE temperature = sqrtf((DATA_TYPE)layer.layer.attention_layer.query_key_size);
+
+    DATA_TYPE grad_sum = grad_output * output_value;
+    atomicAdd(&layer.layer.attention_layer.softmax_grad_sums[vector_idx], grad_sum);
+
+    DATA_TYPE grad_direct = grad_output * exp_value / sum_exp_value * 1.0f / temperature;
+    atomicAdd(&layer.layer.attention_layer.attention_score_masked_grads[idx], grad_direct);
+}
+
+__global__ void grad_attention_layer_softmax_step_2(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    if (idx >= total) return;
+
+    int vector_idx = idx / layer.layer.attention_layer.context_length;
+
+    DATA_TYPE grad_output = layer.layer.attention_layer.attention_percentage_grads[idx];
+    DATA_TYPE output_value = layer.layer.attention_layer.attention_percentages[idx];
+    DATA_TYPE grad_sum = layer.layer.attention_layer.softmax_grad_sums[vector_idx];
+    DATA_TYPE temperature = sqrtf((DATA_TYPE)layer.layer.attention_layer.query_key_size);
+
+    DATA_TYPE grad_through_sum = -output_value * grad_sum / temperature;
+    atomicAdd(&layer.layer.attention_layer.attention_score_masked_grads[idx], grad_through_sum);
 }
