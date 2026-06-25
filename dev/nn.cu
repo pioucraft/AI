@@ -67,7 +67,7 @@ int create_nn(NN* nn) {
 }
 
 int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
-    if(nn->layers[0].layer_type == LAYER_TYPE_MLP || nn->layers[0].layer_type == LAYER_TYPE_LAYERNORM || nn->layers[0].layer_type == LAYER_TYPE_SOFTMAX) {
+    if(nn->layers[0].layer_type == LAYER_TYPE_MLP || nn->layers[0].layer_type == LAYER_TYPE_LAYERNORM || nn->layers[0].layer_type == LAYER_TYPE_SOFTMAX || nn->layers[0].layer_type == LAYER_TYPE_ATTENTION) {
         nn->layers[0].input.tensor.input = input;
     } else if(nn->layers[0].layer_type == LAYER_TYPE_RELU || nn->layers[0].layer_type == LAYER_TYPE_TANH || nn->layers[0].layer_type == LAYER_TYPE_DROPOUT) { // 1d input and 1d output
         nn->layers[0].input.d1.input = input;
@@ -134,6 +134,8 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             cudaDeviceSynchronize();
             softmax_compute_outputs<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
+        } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
+            // [THIS]
         }
     }
 
