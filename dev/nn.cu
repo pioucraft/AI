@@ -135,7 +135,40 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             softmax_compute_outputs<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
-            // [THIS]
+            int qk_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int v_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int scores_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+            int sums_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+            int output_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
+
+            int num_blocks_qk = qk_size / NUM_THREADS + 1;
+            attention_forward_key_query<<<num_blocks_qk, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_v = v_size / NUM_THREADS + 1;
+            attention_forward_value<<<num_blocks_v, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_scores = scores_size / NUM_THREADS + 1;
+            attention_forward_scores<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            attention_forward_masking<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_sums = sums_size / NUM_THREADS + 1;
+            attention_softmax_zero_exp_sums<<<num_blocks_sums, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            attention_softmax_compute_exps<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            attention_softmax_compute_outputs<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_output = output_size / NUM_THREADS + 1;
+            attention_forward_value_weighted_sum<<<num_blocks_output, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
         }
     }
 
@@ -177,7 +210,7 @@ __global__ void zero_grads_layer_tensor_output(Layer layer) {
 int zero_grads_nn(NN* nn) {
     for(int i = 0; i < nn->num_layers; i++) {
         Layer layer = nn->layers[i];
-        if(layer.layer_type == LAYER_TYPE_MLP || layer.layer_type == LAYER_TYPE_LAYERNORM) {
+        if(layer.layer_type == LAYER_TYPE_MLP || layer.layer_type == LAYER_TYPE_LAYERNORM || layer.layer_type == LAYER_TYPE_SOFTMAX || layer.layer_type == LAYER_TYPE_ATTENTION) { // tensor input and tensor output
             int output_size = layer.output.tensor.output_size;
             int num_blocks = output_size * layer.num_out_channels / NUM_THREADS + 1;
             zero_grads_layer_tensor_output<<<num_blocks, NUM_THREADS>>>(layer);
