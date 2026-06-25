@@ -64,15 +64,33 @@ typedef struct Softmax_Layer {
 typedef struct Attention_Layer {
     int context_length;
     int embedding_size;
-    int query_key_value_size;
+    int query_key_size;
+    int num_heads;
 
     DATA_TYPE* query_weights;
     DATA_TYPE* key_weights;
     DATA_TYPE* value_weights;
 
-    DATA_TYPE* query_grads;
-    DATA_TYPE* key_grads;
-    DATA_TYPE* value_grads;
+    DATA_TYPE* query_weight_grads;
+    DATA_TYPE* key_weight_grads;
+    DATA_TYPE* value_weight_grads;
+
+    DATA_TYPE* queries;
+    DATA_TYPE* keys;
+    DATA_TYPE* values;
+
+    DATA_TYPE* attention_scores;
+    DATA_TYPE* attention_score_grads;
+
+    DATA_TYPE* attention_scores_masked;
+    DATA_TYPE* attention_score_masked_grads;
+
+    DATA_TYPE* softmax_exp_values;
+    DATA_TYPE* softmax_sums_exp_values;
+    DATA_TYPE* softmax_grad_sums;
+
+    DATA_TYPE* attention_percentages;
+    DATA_TYPE* attention_percentage_grads;
 } Attention_Layer;
 
 typedef struct Layer {

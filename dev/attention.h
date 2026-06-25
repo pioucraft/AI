@@ -7,7 +7,18 @@
 #include "nn.h"
 #include "utils.h"
 
-int create_attention_layer(Layer* layer, int context_size, int embedding_size, int query_key_value_size);
+int create_attention_layer(Layer* layer, int context_length, int embedding_size, int query_key_size, int num_heads);
+
+__global__ void attention_forward_key_query(Layer layer);
+
+__global__ void attention_forward_key_query(Layer layer);
+__global__ void attention_forward_value(Layer layer);
+__global__ void attention_forward_scores(Layer layer);
+__global__ void attention_forward_masking(Layer layer);
+__global__ void attention_softmax_zero_exp_sums(Layer layer);
+__global__ void attention_softmax_compute_exps(Layer layer);
+__global__ void attention_softmax_compute_outputs(Layer layer);
+__global__ void attention_forward_value_weighted_sum(Layer layer);
 
 /*
 __global__ void layernorm_forward_zero_variance_mean(Layer layer);

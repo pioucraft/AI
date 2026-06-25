@@ -11,6 +11,7 @@
 #include "tanh.h"
 #include "utils.h"
 #include "layernorm.h"
+#include "attention.h"
 
 int create_nn(NN* nn) {
     DATA_TYPE* current_input = NULL;
@@ -326,6 +327,9 @@ int update_nn(NN* nn, DATA_TYPE learning_rate) {
         } else if(layer.layer_type == LAYER_TYPE_CONVOLUTION) {
             int num_blocks = layer.layer.convolution_layer.filters_num * layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions / NUM_THREADS + 1;
             update_convolution_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
+        } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
+            int num_blocks = layer.input.tensor.tensor_dimensions[0] * layer.num_out_channels / NUM_THREADS + 1;
+            update_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
         }
     }
 
