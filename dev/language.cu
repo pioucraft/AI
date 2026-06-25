@@ -39,7 +39,13 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
     cudaMemcpy(device_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyDeviceToDevice);
     cudaMemcpy(host_context, device_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyDeviceToHost);
 
-    printf("Testing NN...\n");
+    char input_text[129];
+    for(int j = 0; j < 128; j++) {
+        input_text[j] = untokenizer(test_unembed(host_context + j * 65), tokens);
+    }
+    input_text[128] = '\0';
+
+    char output_text[65];
     for(int step = 0; step < 64; step++) {
         call_nn(nn, device_context, 0);
 
@@ -49,6 +55,7 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
                    cudaMemcpyDeviceToHost);
 
         int predicted_token = test_unembed(host_context + 127 * 65);
+        output_text[step] = untokenizer(predicted_token, tokens);
 
         memmove(host_context, host_context + 65, sizeof(DATA_TYPE) * 127 * 65);
 
@@ -57,14 +64,13 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
         }
 
         cudaMemcpy(device_context, host_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyHostToDevice);
-
-        printf("Step %d: ", step);
-        for(int j = 0; j < 128; j++) {
-            char current_char = untokenizer(test_unembed(host_context + j * 65), tokens);
-            printf("%c", current_char);
-        }
-        printf("\n");
     }
+    output_text[64] = '\0';
+
+    printf("\x1b[31m----------------------------\x1b[0m\n");
+    printf("input:\n%s\n\n", input_text);
+    printf("output:\n%s\n", output_text);
+    printf("\x1b[31m----------------------------\x1b[0m\n");
 
     free(host_context);
     cudaFree(device_context);
@@ -125,8 +131,8 @@ int main() {
             zero_grads_nn(&nn);
             call_nn(&nn, dataset + i * 65, 1);
             grad_nn(&nn, dataset + (i + 1) * 65);
-            if(i % 10000 == 0) {
-                test_nn(&nn, dataset, tokens, i);
+            if(i % 100 == 0) {
+                test_nn(&nn, dataset, tokens, 0);
                 printf("Processed %d samples\n", i);
             }
             update_nn(&nn, learning_rate / BATCH_SIZE);

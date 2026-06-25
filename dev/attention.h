@@ -20,16 +20,16 @@ __global__ void attention_softmax_compute_exps(Layer layer);
 __global__ void attention_softmax_compute_outputs(Layer layer);
 __global__ void attention_forward_value_weighted_sum(Layer layer);
 
-/*
-__global__ void zero_input_grads_layernorm_layer(Layer layer);
+__global__ void grad_attention_layer_value_weighted_sum(Layer layer);
+__global__ void grad_attention_layer_softmax_step_1(Layer layer);
+__global__ void grad_attention_layer_softmax_step_2(Layer layer);
+__global__ void grad_attention_layer_masking(Layer layer);
+__global__ void grad_attention_layer_scores(Layer layer);
+__global__ void grad_attention_layer_key_query(Layer layer);
+__global__ void grad_attention_layer_value(Layer layer);
 
-__global__ void grad_layernorm_layer(Layer layer);
-__global__ void grad_layernorm_layer_step_two(Layer layer);
-
-__global__ void zero_grads_layernorm_layer(Layer layer);
-
-int save_layernorm_layer(Layer layer, FILE* file);
-int load_layernorm_layer(Layer* layer, FILE* file);
-*/
+__global__ void zero_grads_attention_layer(Layer layer);
+__global__ void zero_input_grads_attention_layer(Layer layer);
+__global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate);
 
 #endif

@@ -121,6 +121,11 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
                 .softmax_grad_sums = softmax_grad_sums,
 
                 .attention_percentages = attention_percentages,
+                .attention_percentage_grads = attention_percentage_grads,
+
+                .value_grads = value_grads,
+                .query_grads = query_grads,
+                .key_grads = key_grads,
             }
         }
     };
@@ -441,5 +446,79 @@ __global__ void grad_attention_layer_value(Layer layer) {
 
         atomicAdd(&layer.layer.attention_layer.value_weight_grads[weight_idx], layer.layer.attention_layer.value_grads[idx] * layer.input.tensor.input[input_idx]);
         atomicAdd(&layer.input.tensor.grads[input_idx], layer.layer.attention_layer.value_grads[idx] * layer.layer.attention_layer.value_weights[weight_idx]);
+    }
+}
+
+__global__ void zero_grads_attention_layer(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+    int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+    int total = qk_weight_size + qk_weight_size + v_weight_size;
+
+    if (idx >= total) return;
+
+    if (idx < qk_weight_size) {
+        layer.layer.attention_layer.query_weight_grads[idx] = 0.0f;
+    } else if (idx < 2 * qk_weight_size) {
+        layer.layer.attention_layer.key_weight_grads[idx - qk_weight_size] = 0.0f;
+    } else {
+        layer.layer.attention_layer.value_weight_grads[idx - 2 * qk_weight_size] = 0.0f;
+    }
+}
+
+__global__ void zero_input_grads_attention_layer(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int input_size = layer.input.tensor.input_size;
+    int q_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+    int v_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+    int scores_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    int sums_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+
+    int off = input_size;
+    int q_end = off + q_size;
+    int v_end = q_end + v_size;
+    int score_end = v_end + scores_size;
+    int masked_end = score_end + scores_size;
+    int pct_end = masked_end + scores_size;
+    int total = pct_end + sums_size;
+
+    if (idx >= total) return;
+
+    if (idx < input_size) {
+        if (layer.input.tensor.grads != NULL)
+            layer.input.tensor.grads[idx] = 0.0f;
+    } else if (idx < q_end) {
+        layer.layer.attention_layer.query_grads[idx - off] = 0.0f;
+        layer.layer.attention_layer.key_grads[idx - off] = 0.0f;
+    } else if (idx < v_end) {
+        layer.layer.attention_layer.value_grads[idx - q_end] = 0.0f;
+    } else if (idx < score_end) {
+        layer.layer.attention_layer.attention_score_grads[idx - v_end] = 0.0f;
+    } else if (idx < masked_end) {
+        layer.layer.attention_layer.attention_score_masked_grads[idx - score_end] = 0.0f;
+    } else if (idx < pct_end) {
+        layer.layer.attention_layer.attention_percentage_grads[idx - masked_end] = 0.0f;
+    } else {
+        layer.layer.attention_layer.softmax_grad_sums[idx - pct_end] = 0.0f;
+    }
+}
+
+__global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+    int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+    int total = qk_weight_size + qk_weight_size + v_weight_size;
+
+    if (idx >= total) return;
+
+    if (idx < qk_weight_size) {
+        layer.layer.attention_layer.query_weights[idx] -= learning_rate * layer.layer.attention_layer.query_weight_grads[idx];
+    } else if (idx < 2 * qk_weight_size) {
+        layer.layer.attention_layer.key_weights[idx - qk_weight_size] -= learning_rate * layer.layer.attention_layer.key_weight_grads[idx - qk_weight_size];
+    } else {
+        layer.layer.attention_layer.value_weights[idx - 2 * qk_weight_size] -= learning_rate * layer.layer.attention_layer.value_weight_grads[idx - 2 * qk_weight_size];
     }
 }

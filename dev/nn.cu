@@ -233,6 +233,11 @@ int zero_grads_nn(NN* nn) {
         } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
             int num_blocks = layer.input.tensor.tensor_dimensions[0] * layer.num_out_channels / NUM_THREADS + 1;
             zero_grads_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
+            int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int num_blocks = (qk_weight_size + qk_weight_size + v_weight_size) / NUM_THREADS + 1;
+            zero_grads_attention_layer<<<num_blocks, NUM_THREADS>>>(layer);
         }
     }
 
@@ -344,6 +349,41 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             grad_softmax_layer_step_1<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
             grad_softmax_layer_step_2<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
+            int qk_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int v_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int scores_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+            int sums_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+            int output_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
+
+            if(layer.input.tensor.grads != NULL) {
+                int input_size = layer.input.tensor.input_size;
+                int total = input_size + qk_size + v_size + scores_size + scores_size + scores_size + sums_size;
+                int num_blocks = total / NUM_THREADS + 1;
+                zero_input_grads_attention_layer<<<num_blocks, NUM_THREADS>>>(layer);
+                cudaDeviceSynchronize();
+            }
+
+            int num_blocks_output = output_size / NUM_THREADS + 1;
+            grad_attention_layer_value_weighted_sum<<<num_blocks_output, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_scores = scores_size / NUM_THREADS + 1;
+            grad_attention_layer_softmax_step_1<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+            grad_attention_layer_softmax_step_2<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+            grad_attention_layer_masking<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+            grad_attention_layer_scores<<<num_blocks_scores, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_qk = qk_size / NUM_THREADS + 1;
+            grad_attention_layer_key_query<<<num_blocks_qk, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            int num_blocks_v = v_size / NUM_THREADS + 1;
+            grad_attention_layer_value<<<num_blocks_v, NUM_THREADS>>>(layer);
         }
 
         cudaDeviceSynchronize();
@@ -369,6 +409,11 @@ int update_nn(NN* nn, DATA_TYPE learning_rate) {
         } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
             int num_blocks = layer.input.tensor.tensor_dimensions[0] * layer.num_out_channels / NUM_THREADS + 1;
             update_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
+        } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
+            int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int num_blocks = (qk_weight_size + qk_weight_size + v_weight_size) / NUM_THREADS + 1;
+            update_attention_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
         }
     }
 
