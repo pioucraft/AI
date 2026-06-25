@@ -3,75 +3,112 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
+#include <string.h>
 
 #include "mlp.h"
 #include "nn.h"
 #include "relu.h"
-#include "tanh.h"
 #include "utils.h"
+#include "attention.h"
+#include "layernorm.h"
+#include "softmax.h"
 #include "../language/language.h"
 
-#define NUM_CYCLES 100
-#define DATASET_SIZE 1e6
+#define NUM_CYCLES 10
+#define DATASET_SIZE 1000000
 #define BATCH_SIZE 1
 #define LEARNING_RATE 1e-4
 
-int test_unembed(DATA_TYPE* embedded) {
+int test_unembed(DATA_TYPE* probs) {
     DATA_TYPE max = -1.0;
     int predicted_token = -1;
     for(int j = 0; j < 65; j++) {
-        if(embedded[j] > max) {
-            max = embedded[j];
+        if(probs[j] > max) {
+            max = probs[j];
             predicted_token = j;
         }
     }
-
     return predicted_token;
 }
 
-int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens) {
-    DATA_TYPE* input;
-    cudaMallocManaged(&input, sizeof(DATA_TYPE) * 128 * 65);
-    cudaMemcpy(input, dataset, sizeof(DATA_TYPE) * 32 * 65, cudaMemcpyHostToDevice);
+int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
+    DATA_TYPE* host_context = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * 128 * 65);
+    DATA_TYPE* device_context;
+    cudaMalloc(&device_context, sizeof(DATA_TYPE) * 128 * 65);
+
+    cudaMemcpy(device_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyHostToDevice);
+    memcpy(host_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65);
+
     printf("Testing NN...\n");
-    for(int i = 0; i < 64; i++) {
-        call_nn(nn, input + i * 65, 0);
-        
-        int predicted_token = test_unembed(nn->layers[3].output.d1.output);
+    for(int step = 0; step < 64; step++) {
+        call_nn(nn, device_context, 0);
+
+        cudaMemcpy(host_context + 127 * 65,
+                   nn->layers[8].output.tensor.output + 127 * 65,
+                   sizeof(DATA_TYPE) * 65,
+                   cudaMemcpyDeviceToHost);
+
+        int predicted_token = test_unembed(host_context + 127 * 65);
+
+        memmove(host_context, host_context + 65, sizeof(DATA_TYPE) * 127 * 65);
+
         for(int j = 0; j < 65; j++) {
-            input[32 * 65 + i * 65 + j] = predicted_token == j ? 1.0 : -1.0;
+            host_context[127 * 65 + j] = predicted_token == j ? 1.0 : -1.0;
         }
-        for(int j = 0; j < 32 + i; j++) {
-            int current_token = test_unembed(input + j * 65);
-            char current_char = untokenizer(current_token, tokens);
-            if(j == 32) printf("...");
+
+        cudaMemcpy(device_context, host_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyHostToDevice);
+
+        printf("Step %d: ", step);
+        for(int j = 0; j < 128; j++) {
+            char current_char = untokenizer(test_unembed(host_context + j * 65), tokens);
             printf("%c", current_char);
         }
         printf("\n");
     }
+
+    free(host_context);
+    cudaFree(device_context);
     return 0;
 }
 
 int main() {
     printf("Hello, CUDA!\n");
 
-    int current_layer = 0;
-    Layer* layers = (Layer*)malloc(sizeof(*layers) * 20); // Allocate memory for 20 layers
+    int tokens_size = 65;
+    int context_length = 128;
+    int embedding_size = 128;
+    int query_key_size = 16;
+    int num_heads = 8;
+    int ffn_hidden_size = 512;
 
-    int tokens_size = 65; // Number of unique tokens in the dataset
-    int context_length = 128; // Length of the context window
-    int embedding_size = 128; // Size of the embedding vector
+    int num_layers = 9;
+    Layer* layers = (Layer*)malloc(sizeof(*layers) * num_layers);
+    int l = 0;
 
-    create_mlp_layer(&layers[current_layer++], 2, (int[]){context_length, tokens_size}, embedding_size);
+    create_mlp_layer(&layers[l++], 2, (int[]){context_length, tokens_size}, embedding_size);
 
+    create_attention_layer(&layers[l++], context_length, embedding_size, query_key_size, num_heads);
+
+    create_layernorm_layer(&layers[l++], 2, (int[]){context_length, embedding_size});
+
+    create_mlp_layer(&layers[l++], 2, (int[]){context_length, embedding_size}, ffn_hidden_size);
+
+    create_relu_layer(&layers[l++], context_length * ffn_hidden_size);
+
+    create_mlp_layer(&layers[l++], 2, (int[]){context_length, ffn_hidden_size}, embedding_size);
+
+    create_layernorm_layer(&layers[l++], 2, (int[]){context_length, embedding_size});
+
+    create_mlp_layer(&layers[l++], 2, (int[]){context_length, embedding_size}, tokens_size);
+
+    create_softmax_layer(&layers[l++], 2, (int[]){context_length, tokens_size}, 1.0);
 
     NN nn = {
-        .num_layers = current_layer,
+        .num_layers = l,
         .layers = layers
     };
 
     create_nn(&nn);
-    // load_nn(&nn, "model.data");
     printf("NN created with %d layers\n", nn.num_layers);
 
     DATA_TYPE* dataset;
@@ -79,26 +116,23 @@ int main() {
     printf("Loading dataset...\n");
     load_language_dataset("language/tinyshakespeare.txt", DATASET_SIZE, &dataset, &tokens);
 
-
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);
 
         DATA_TYPE learning_rate = LEARNING_RATE * (1.0f - (float)cycle / NUM_CYCLES);
 
-        for(int i = 0; i < DATASET_SIZE - 65; i++) { // - 64 for context length and -1 for output
+        for(int i = 0; i < DATASET_SIZE - context_length - 1; i++) {
             zero_grads_nn(&nn);
             call_nn(&nn, dataset + i * 65, 1);
-            grad_nn(&nn, dataset + (i + 32) * 65);
+            grad_nn(&nn, dataset + (i + 1) * 65);
             if(i % 10000 == 0) {
-                test_nn(&nn, dataset, tokens);
+                test_nn(&nn, dataset, tokens, i);
                 printf("Processed %d samples\n", i);
-                save_nn(&nn, "model.data");
-            };
+            }
             update_nn(&nn, learning_rate / BATCH_SIZE);
         }
-        
     }
 
+    free(layers);
     return 0;
 }
-
