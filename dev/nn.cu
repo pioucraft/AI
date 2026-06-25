@@ -243,14 +243,14 @@ int zero_grads_nn(NN* nn) {
 }
 
 __global__ void grad_error(Layer output_layer, DATA_TYPE* expected_output) {
-    // We assume that the output layer is always a tanh activation function
-    int output_idx = threadIdx.x;
-    DATA_TYPE error_grad;
+    int output_idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(output_layer.layer_type == LAYER_TYPE_SOFTMAX) {
-        error_grad = 2 * (output_layer.output.tensor.output[output_idx] - expected_output[output_idx]);
-    output_layer.output.tensor.grads[output_idx] = error_grad;
+        if(output_idx >= output_layer.output.tensor.output_size) return;
+        DATA_TYPE error_grad = 2 * (output_layer.output.tensor.output[output_idx] - expected_output[output_idx]);
+        output_layer.output.tensor.grads[output_idx] = error_grad;
     } else if(output_layer.layer_type == LAYER_TYPE_TANH) {
-        error_grad = 2 * (output_layer.output.d1.output[output_idx] - expected_output[output_idx]);
+        if(output_idx >= output_layer.output.d1.output_size) return;
+        DATA_TYPE error_grad = 2 * (output_layer.output.d1.output[output_idx] - expected_output[output_idx]);
         output_layer.output.d1.grads[output_idx] = error_grad;
     }
 }
@@ -260,9 +260,13 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
         Layer layer = nn->layers[i];
         if(i == nn->num_layers - 1) {
             if(nn->layers[i].layer_type == LAYER_TYPE_SOFTMAX) {
-                grad_error<<<1, layer.output.tensor.output_size>>>(layer, expected_output);
+                int output_size = layer.output.tensor.output_size;
+                int num_blocks = output_size / NUM_THREADS + 1;
+                grad_error<<<num_blocks, NUM_THREADS>>>(layer, expected_output);
             } else if(nn->layers[i].layer_type == LAYER_TYPE_TANH) {
-                grad_error<<<1, layer.output.d1.output_size>>>(layer, expected_output);
+                int output_size = layer.output.d1.output_size;
+                int num_blocks = output_size / NUM_THREADS + 1;
+                grad_error<<<num_blocks, NUM_THREADS>>>(layer, expected_output);
             }
         }
         cudaDeviceSynchronize();

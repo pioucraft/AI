@@ -125,7 +125,9 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
 
 __global__ void attention_forward_key_query(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // each idx is an output scalar
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+    if(idx >= total) return;
 
     layer.layer.attention_layer.queries[idx] = 0;
     layer.layer.attention_layer.keys[idx] = 0;
@@ -151,7 +153,9 @@ __global__ void attention_forward_key_query(Layer layer) {
 
 __global__ void attention_forward_value(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // each idx is an output scalar
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+    if(idx >= total) return;
 
     layer.layer.attention_layer.values[idx] = 0;
 
@@ -174,8 +178,9 @@ __global__ void attention_forward_value(Layer layer) {
 
 __global__ void attention_forward_scores(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // Each idx is an output scalar
-    // Computes the dot product of each query and key vectors
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    if(idx >= total) return;
 
     layer.layer.attention_layer.attention_scores[idx] = 0;
 
@@ -197,6 +202,9 @@ __global__ void attention_forward_scores(Layer layer) {
 
 __global__ void attention_forward_masking(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int total = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
+    if(idx >= total) return;
 
     int head_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length;
     int local_idx = idx % head_size;

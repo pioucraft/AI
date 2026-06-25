@@ -36,8 +36,8 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
     DATA_TYPE* device_context;
     cudaMalloc(&device_context, sizeof(DATA_TYPE) * 128 * 65);
 
-    cudaMemcpy(device_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyHostToDevice);
-    memcpy(host_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65);
+    cudaMemcpy(device_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(host_context, device_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyDeviceToHost);
 
     printf("Testing NN...\n");
     for(int step = 0; step < 64; step++) {
