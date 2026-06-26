@@ -23,12 +23,14 @@
 int test_unembed(DATA_TYPE* probs) {
     DATA_TYPE min = 1.0;
     DATA_TYPE random = (DATA_TYPE)rand() / RAND_MAX;
+    DATA_TYPE cumulative = 0.0;
     int predicted_token = -1;
     for(int j = 0; j < 65; j++) {
-        if(probs[j] < min && probs[j] > random) {
-            min = probs[j];
+        cumulative += probs[j];
+        if(cumulative >= random) {
             predicted_token = j;
-        } 
+            break;
+        }
     }
     return predicted_token;
 }
