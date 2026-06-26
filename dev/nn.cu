@@ -89,6 +89,13 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             int num_blocks = batch_size * input_feature_size * output_feature_size / NUM_THREADS + 1;
             mlp_forward<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
+
+            if(i == 0 && nn->pos_encoding != NULL) {
+                int total = layer.output.tensor.output_size;
+                int nb = (total + NUM_THREADS - 1) / NUM_THREADS;
+                add_pos_encoding<<<nb, NUM_THREADS>>>(layer.output.tensor.output, nn->pos_encoding, total);
+                cudaDeviceSynchronize();
+            }
         } else if(layer.layer_type == LAYER_TYPE_POOLING) {
             int num_blocks = layer.num_out_channels * layer.output.d2.output_dimensions * layer.output.d2.output_dimensions / NUM_THREADS + 1;
             pooling_forward<<<num_blocks, NUM_THREADS>>>(layer);
@@ -241,6 +248,10 @@ int zero_grads_nn(NN* nn) {
         }
     }
 
+    if(nn->pos_encoding != NULL) {
+        cudaMemset(nn->pos_encoding_grads, 0, nn->layers[0].output.tensor.output_size * sizeof(DATA_TYPE));
+    }
+
     cudaDeviceSynchronize();
     checkCudaError();
 
@@ -386,6 +397,12 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
         cudaDeviceSynchronize();
     }
 
+    if(nn->pos_encoding != NULL) {
+        int total_size = nn->layers[0].output.tensor.output_size;
+        int nb = (total_size + NUM_THREADS - 1) / NUM_THREADS;
+        grad_pos_encoding<<<nb, NUM_THREADS>>>(nn->pos_encoding_grads, nn->layers[0].output.tensor.grads, total_size);
+    }
+
     checkCudaError();
 
     return 0;
@@ -416,6 +433,13 @@ int update_nn(NN* nn, DATA_TYPE learning_rate, DATA_TYPE weight_decay) {
         }
     }
 
+    if(nn->pos_encoding != NULL) {
+        int total_size = nn->layers[0].output.tensor.output_size;
+        int nb = (total_size + NUM_THREADS - 1) / NUM_THREADS;
+        update_pos_encoding<<<nb, NUM_THREADS>>>(nn->pos_encoding, nn->pos_encoding_grads,
+            nn->pos_encoding_adam, total_size, learning_rate, nn->adamw_timestep, weight_decay);
+    }
+
     cudaDeviceSynchronize();
     checkCudaError();
 
@@ -442,6 +466,14 @@ int save_nn(NN* nn, const char* filename) {
         }
     }
 
+    if(nn->pos_encoding != NULL) {
+        int total_size = nn->layers[0].output.tensor.output_size;
+        DATA_TYPE* host_pos = (DATA_TYPE*)malloc(total_size * sizeof(DATA_TYPE));
+        cudaMemcpy(host_pos, nn->pos_encoding, total_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+        fwrite(host_pos, sizeof(DATA_TYPE), total_size, file);
+        free(host_pos);
+    }
+
     fclose(file);
     return 0;
 }
@@ -464,6 +496,14 @@ int load_nn(NN* nn, const char* filename) {
         } else if(layer->layer_type == LAYER_TYPE_ATTENTION) {
             load_attention_layer(layer, file);
         }
+    }
+
+    if(nn->pos_encoding != NULL) {
+        int total_size = nn->layers[0].output.tensor.output_size;
+        DATA_TYPE* host_pos = (DATA_TYPE*)malloc(total_size * sizeof(DATA_TYPE));
+        fread(host_pos, sizeof(DATA_TYPE), total_size, file);
+        cudaMemcpy(nn->pos_encoding, host_pos, total_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+        free(host_pos);
     }
 
     fclose(file);
@@ -562,6 +602,12 @@ int clip_grads_nn(NN* nn, DATA_TYPE max_norm) {
         }
     }
 
+    if(nn->pos_encoding != NULL) {
+        int total_size = nn->layers[0].output.tensor.output_size;
+        int num_blocks = total_size / NUM_THREADS + 1;
+        grad_sq_sum<<<num_blocks, NUM_THREADS>>>(nn->pos_encoding_grads, total_size, d_sq_sum);
+    }
+
     cudaDeviceSynchronize();
 
     DATA_TYPE h_sq_sum;
@@ -628,10 +674,52 @@ int clip_grads_nn(NN* nn, DATA_TYPE max_norm) {
                 }
             }
         }
+
+        if(nn->pos_encoding != NULL) {
+            int total_size = nn->layers[0].output.tensor.output_size;
+            int num_blocks = total_size / NUM_THREADS + 1;
+            scale_grads<<<num_blocks, NUM_THREADS>>>(nn->pos_encoding_grads, total_size, scale);
+        }
     }
 
     cudaDeviceSynchronize();
     checkCudaError();
 
     return 0;
+}
+
+__global__ void add_pos_encoding(DATA_TYPE* output, DATA_TYPE* pos_encoding, int total_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < total_size) {
+        output[idx] += pos_encoding[idx];
+    }
+}
+
+__global__ void grad_pos_encoding(DATA_TYPE* pos_grads, DATA_TYPE* grads, int total_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < total_size) {
+        atomicAdd(&pos_grads[idx], grads[idx]);
+    }
+}
+
+__global__ void update_pos_encoding(DATA_TYPE* pos, DATA_TYPE* pos_grads, AdamW_State adam,
+                                    int total_size, DATA_TYPE lr, int timestep, DATA_TYPE wd) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= total_size) return;
+
+    DATA_TYPE grad = pos_grads[idx];
+    DATA_TYPE weight = pos[idx];
+    DATA_TYPE m = adam.m[idx];
+    DATA_TYPE v = adam.v[idx];
+
+    m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+    v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+    DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+    DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+    adam.m[idx] = m;
+    adam.v[idx] = v;
+
+    pos[idx] = weight - lr * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - lr * wd * weight;
 }

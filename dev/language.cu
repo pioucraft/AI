@@ -142,9 +142,34 @@ int main() {
 
     create_softmax_layer(&layers[l++], 2, (int[]){context_length, tokens_size}, 1.0);
 
+    int pos_count = context_length * embedding_size;
+    DATA_TYPE* pos_encoding;
+    DATA_TYPE* pos_encoding_grads;
+    cudaMalloc(&pos_encoding, pos_count * sizeof(DATA_TYPE));
+    cudaMalloc(&pos_encoding_grads, pos_count * sizeof(DATA_TYPE));
+    cudaMemset(pos_encoding_grads, 0, pos_count * sizeof(DATA_TYPE));
+
+    DATA_TYPE* pos_adam_m;
+    DATA_TYPE* pos_adam_v;
+    cudaMalloc(&pos_adam_m, pos_count * sizeof(DATA_TYPE));
+    cudaMalloc(&pos_adam_v, pos_count * sizeof(DATA_TYPE));
+    cudaMemset(pos_adam_m, 0, pos_count * sizeof(DATA_TYPE));
+    cudaMemset(pos_adam_v, 0, pos_count * sizeof(DATA_TYPE));
+
+    DATA_TYPE* host_pos = (DATA_TYPE*)malloc(pos_count * sizeof(DATA_TYPE));
+    DATA_TYPE deviation = sqrt(2.0f / embedding_size);
+    for(int i = 0; i < pos_count; i++) {
+        host_pos[i] = (DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation;
+    }
+    cudaMemcpy(pos_encoding, host_pos, pos_count * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+    free(host_pos);
+
     NN nn = {
         .num_layers = l,
-        .layers = layers
+        .layers = layers,
+        .pos_encoding = pos_encoding,
+        .pos_encoding_grads = pos_encoding_grads,
+        .pos_encoding_adam = {.m = pos_adam_m, .v = pos_adam_v}
     };
 
     create_nn(&nn);
@@ -179,6 +204,10 @@ int main() {
         }
     }
 
+    cudaFree(nn.pos_encoding);
+    cudaFree(nn.pos_encoding_grads);
+    cudaFree(nn.pos_encoding_adam.m);
+    cudaFree(nn.pos_encoding_adam.v);
     free(layers);
     return 0;
 }

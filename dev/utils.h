@@ -182,6 +182,9 @@ typedef struct NN {
     int num_layers;
     Layer* layers;
     int adamw_timestep;
+    DATA_TYPE* pos_encoding;
+    DATA_TYPE* pos_encoding_grads;
+    AdamW_State pos_encoding_adam;
 } NN;
 
 #endif
