@@ -16,7 +16,7 @@ __global__ void zero_grads_convolution_layer(Layer layer);
 
 __global__ void grad_convolution_layer(Layer layer);
 
-__global__ void update_convolution_layer(Layer layer, DATA_TYPE learning_rate);
+__global__ void update_convolution_layer(Layer layer, DATA_TYPE learning_rate, int timestep, DATA_TYPE weight_decay);
 
 __global__ void zero_input_grads_convolution_layer(Layer layer);
 

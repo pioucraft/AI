@@ -44,6 +44,16 @@ int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR
     cudaMalloc(&weight_grads, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
     cudaMalloc(&bias_grads, output_feature_size * sizeof(DATA_TYPE));
 
+    AdamW_State weights_adam, biases_adam;
+    cudaMalloc(&weights_adam.m, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    cudaMalloc(&weights_adam.v, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    cudaMemset(weights_adam.m, 0, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    cudaMemset(weights_adam.v, 0, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
+    cudaMalloc(&biases_adam.m, output_feature_size * sizeof(DATA_TYPE));
+    cudaMalloc(&biases_adam.v, output_feature_size * sizeof(DATA_TYPE));
+    cudaMemset(biases_adam.m, 0, output_feature_size * sizeof(DATA_TYPE));
+    cudaMemset(biases_adam.v, 0, output_feature_size * sizeof(DATA_TYPE));
+
     int output_tensor_dimensions[TENSOR_MAX_RANK] = {batch_size, output_feature_size, 0, 0};
 
     *layer = (Layer){
@@ -68,7 +78,10 @@ int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR
                 .biases = biases,
 
                 .weight_grads = weight_grads,
-                .bias_grads = bias_grads
+                .bias_grads = bias_grads,
+
+                .weights_adam = weights_adam,
+                .biases_adam = biases_adam
             }
         }
     };
@@ -165,7 +178,7 @@ __global__ void grad_mlp_layer(Layer layer) {
     }
 }
 
-__global__ void update_mlp_layer(Layer layer, DATA_TYPE learning_rate) {
+__global__ void update_mlp_layer(Layer layer, DATA_TYPE learning_rate, int timestep, DATA_TYPE weight_decay) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     int input_feature_size = layer.input.tensor.tensor_dimensions[1];
@@ -181,9 +194,38 @@ __global__ void update_mlp_layer(Layer layer, DATA_TYPE learning_rate) {
     int input_idx = idx % input_feature_size;
 
     if(input_idx == 0) {
-        layer.layer.mlp_layer.biases[neuron_idx] -= learning_rate * layer.layer.mlp_layer.bias_grads[neuron_idx];
+        DATA_TYPE grad = layer.layer.mlp_layer.bias_grads[neuron_idx];
+        DATA_TYPE bias = layer.layer.mlp_layer.biases[neuron_idx];
+        DATA_TYPE m = layer.layer.mlp_layer.biases_adam.m[neuron_idx];
+        DATA_TYPE v = layer.layer.mlp_layer.biases_adam.v[neuron_idx];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.mlp_layer.biases_adam.m[neuron_idx] = m;
+        layer.layer.mlp_layer.biases_adam.v[neuron_idx] = v;
+
+        layer.layer.mlp_layer.biases[neuron_idx] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * bias;
     }
-    layer.layer.mlp_layer.weights[idx] -= learning_rate * layer.layer.mlp_layer.weight_grads[idx];
+
+    DATA_TYPE grad = layer.layer.mlp_layer.weight_grads[idx];
+    DATA_TYPE weight = layer.layer.mlp_layer.weights[idx];
+    DATA_TYPE m = layer.layer.mlp_layer.weights_adam.m[idx];
+    DATA_TYPE v = layer.layer.mlp_layer.weights_adam.v[idx];
+
+    m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+    v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+    DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+    DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+    layer.layer.mlp_layer.weights_adam.m[idx] = m;
+    layer.layer.mlp_layer.weights_adam.v[idx] = v;
+
+    layer.layer.mlp_layer.weights[idx] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
 }
 
 int save_mlp_layer(Layer layer, FILE* file) {

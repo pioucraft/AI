@@ -21,7 +21,7 @@ __global__ void grad_layernorm_layer_step_two(Layer layer);
 
 __global__ void zero_grads_layernorm_layer(Layer layer);
 
-__global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate);
+__global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate, int timestep, DATA_TYPE weight_decay);
 
 int save_layernorm_layer(Layer layer, FILE* file);
 int load_layernorm_layer(Layer* layer, FILE* file);

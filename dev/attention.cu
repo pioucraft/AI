@@ -33,6 +33,22 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
     cudaMalloc(&key_weight_grads, sizeof(DATA_TYPE) * embedding_size * query_key_size * num_heads);
     cudaMalloc(&value_weight_grads, sizeof(DATA_TYPE) * embedding_size * embedding_size * num_heads);
 
+    AdamW_State query_adam, key_adam, value_adam;
+    int qk_count = embedding_size * query_key_size * num_heads;
+    int v_count = embedding_size * embedding_size * num_heads;
+    cudaMalloc(&query_adam.m, sizeof(DATA_TYPE) * qk_count);
+    cudaMalloc(&query_adam.v, sizeof(DATA_TYPE) * qk_count);
+    cudaMemset(query_adam.m, 0, sizeof(DATA_TYPE) * qk_count);
+    cudaMemset(query_adam.v, 0, sizeof(DATA_TYPE) * qk_count);
+    cudaMalloc(&key_adam.m, sizeof(DATA_TYPE) * qk_count);
+    cudaMalloc(&key_adam.v, sizeof(DATA_TYPE) * qk_count);
+    cudaMemset(key_adam.m, 0, sizeof(DATA_TYPE) * qk_count);
+    cudaMemset(key_adam.v, 0, sizeof(DATA_TYPE) * qk_count);
+    cudaMalloc(&value_adam.m, sizeof(DATA_TYPE) * v_count);
+    cudaMalloc(&value_adam.v, sizeof(DATA_TYPE) * v_count);
+    cudaMemset(value_adam.m, 0, sizeof(DATA_TYPE) * v_count);
+    cudaMemset(value_adam.v, 0, sizeof(DATA_TYPE) * v_count);
+
     DATA_TYPE* queries;
     DATA_TYPE* keys;
     DATA_TYPE* values;
@@ -105,6 +121,10 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
                 .query_weight_grads = query_weight_grads,
                 .key_weight_grads = key_weight_grads,
                 .value_weight_grads = value_weight_grads,
+
+                .query_adam = query_adam,
+                .key_adam = key_adam,
+                .value_adam = value_adam,
 
                 .queries = queries,
                 .keys = keys,
@@ -505,7 +525,7 @@ __global__ void zero_input_grads_attention_layer(Layer layer) {
     }
 }
 
-__global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate) {
+__global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate, int timestep, DATA_TYPE weight_decay) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
@@ -515,11 +535,57 @@ __global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate) {
     if (idx >= total) return;
 
     if (idx < qk_weight_size) {
-        layer.layer.attention_layer.query_weights[idx] -= learning_rate * layer.layer.attention_layer.query_weight_grads[idx];
+        DATA_TYPE grad = layer.layer.attention_layer.query_weight_grads[idx];
+        DATA_TYPE weight = layer.layer.attention_layer.query_weights[idx];
+        DATA_TYPE m = layer.layer.attention_layer.query_adam.m[idx];
+        DATA_TYPE v = layer.layer.attention_layer.query_adam.v[idx];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.attention_layer.query_adam.m[idx] = m;
+        layer.layer.attention_layer.query_adam.v[idx] = v;
+
+        layer.layer.attention_layer.query_weights[idx] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
     } else if (idx < 2 * qk_weight_size) {
-        layer.layer.attention_layer.key_weights[idx - qk_weight_size] -= learning_rate * layer.layer.attention_layer.key_weight_grads[idx - qk_weight_size];
+        int off = idx - qk_weight_size;
+
+        DATA_TYPE grad = layer.layer.attention_layer.key_weight_grads[off];
+        DATA_TYPE weight = layer.layer.attention_layer.key_weights[off];
+        DATA_TYPE m = layer.layer.attention_layer.key_adam.m[off];
+        DATA_TYPE v = layer.layer.attention_layer.key_adam.v[off];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.attention_layer.key_adam.m[off] = m;
+        layer.layer.attention_layer.key_adam.v[off] = v;
+
+        layer.layer.attention_layer.key_weights[off] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
     } else {
-        layer.layer.attention_layer.value_weights[idx - 2 * qk_weight_size] -= learning_rate * layer.layer.attention_layer.value_weight_grads[idx - 2 * qk_weight_size];
+        int off = idx - 2 * qk_weight_size;
+
+        DATA_TYPE grad = layer.layer.attention_layer.value_weight_grads[off];
+        DATA_TYPE weight = layer.layer.attention_layer.value_weights[off];
+        DATA_TYPE m = layer.layer.attention_layer.value_adam.m[off];
+        DATA_TYPE v = layer.layer.attention_layer.value_adam.v[off];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.attention_layer.value_adam.m[off] = m;
+        layer.layer.attention_layer.value_adam.v[off] = v;
+
+        layer.layer.attention_layer.value_weights[off] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
     }
 }
 

@@ -392,25 +392,27 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
 }
 
 
-int update_nn(NN* nn, DATA_TYPE learning_rate) {
+int update_nn(NN* nn, DATA_TYPE learning_rate, DATA_TYPE weight_decay) {
+    nn->adamw_timestep++;
+
     for(int i = 0; i < nn->num_layers; i++) {
         Layer layer = nn->layers[i];
         if(layer.layer_type == LAYER_TYPE_MLP) {
             int input_feature_size = layer.input.tensor.tensor_dimensions[1];
             int output_feature_size = layer.output.tensor.tensor_dimensions[1];
             int num_blocks = input_feature_size * output_feature_size / NUM_THREADS + 1;
-            update_mlp_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
+            update_mlp_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate, nn->adamw_timestep, weight_decay);
         } else if(layer.layer_type == LAYER_TYPE_CONVOLUTION) {
             int num_blocks = layer.layer.convolution_layer.filters_num * layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions / NUM_THREADS + 1;
-            update_convolution_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
+            update_convolution_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate, nn->adamw_timestep, weight_decay);
         } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
             int num_blocks = layer.input.tensor.tensor_dimensions[0] * layer.num_out_channels / NUM_THREADS + 1;
-            update_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
+            update_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate, nn->adamw_timestep, weight_decay);
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
             int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
             int num_blocks = (qk_weight_size + qk_weight_size + v_weight_size) / NUM_THREADS + 1;
-            update_attention_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate);
+            update_attention_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate, nn->adamw_timestep, weight_decay);
         }
     }
 

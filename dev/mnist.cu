@@ -19,6 +19,7 @@
 #define TEST_DATASET_SIZE 10000
 #define BATCH_SIZE 64
 #define LEARNING_RATE 5e-2
+#define WEIGHT_DECAY 1e-2
 
 int main() {
     printf("Hello, CUDA!\n");
@@ -109,7 +110,7 @@ int main() {
                     printf("Processed %d samples\n", i + j);
                 }
             }
-            update_nn(&nn, learning_rate / BATCH_SIZE);
+            update_nn(&nn, learning_rate / BATCH_SIZE, WEIGHT_DECAY);
         }
         save_nn(&nn, "model.data");
         

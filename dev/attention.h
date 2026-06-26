@@ -30,7 +30,7 @@ __global__ void grad_attention_layer_value(Layer layer);
 
 __global__ void zero_grads_attention_layer(Layer layer);
 __global__ void zero_input_grads_attention_layer(Layer layer);
-__global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate);
+__global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate, int timestep, DATA_TYPE weight_decay);
 
 int save_attention_layer(Layer layer, FILE* file);
 int load_attention_layer(Layer* layer, FILE* file);

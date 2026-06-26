@@ -37,6 +37,16 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
     cudaMalloc(&gain_grads, gain_bias_size * sizeof(DATA_TYPE));
     cudaMalloc(&bias_grads, gain_bias_size * sizeof(DATA_TYPE));
 
+    AdamW_State gains_adam, biases_adam;
+    cudaMalloc(&gains_adam.m, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMalloc(&gains_adam.v, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMemset(gains_adam.m, 0, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMemset(gains_adam.v, 0, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMalloc(&biases_adam.m, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMalloc(&biases_adam.v, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMemset(biases_adam.m, 0, gain_bias_size * sizeof(DATA_TYPE));
+    cudaMemset(biases_adam.v, 0, gain_bias_size * sizeof(DATA_TYPE));
+
     DATA_TYPE* means;
     DATA_TYPE* variances;
 
@@ -76,6 +86,9 @@ int create_layernorm_layer(Layer* layer, int tensor_rank, int tensor_dimensions[
 
                 .gain_grads = gain_grads,
                 .bias_grads = bias_grads,
+
+                .gains_adam = gains_adam,
+                .biases_adam = biases_adam,
 
                 .means = means,
                 .variances = variances,
@@ -255,7 +268,7 @@ __global__ void zero_grads_layernorm_layer(Layer layer) {
     }
 }
 
-__global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate) {
+__global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate, int timestep, DATA_TYPE weight_decay) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     int vector_size = layer.input.tensor.tensor_dimensions[1];
@@ -263,8 +276,41 @@ __global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate) {
         return;
     }
 
-    layer.layer.layernorm_layer.gains[idx] -= learning_rate * layer.layer.layernorm_layer.gain_grads[idx];
-    layer.layer.layernorm_layer.biases[idx] -= learning_rate * layer.layer.layernorm_layer.bias_grads[idx];
+    {
+        DATA_TYPE grad = layer.layer.layernorm_layer.gain_grads[idx];
+        DATA_TYPE gain = layer.layer.layernorm_layer.gains[idx];
+        DATA_TYPE m = layer.layer.layernorm_layer.gains_adam.m[idx];
+        DATA_TYPE v = layer.layer.layernorm_layer.gains_adam.v[idx];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.layernorm_layer.gains_adam.m[idx] = m;
+        layer.layer.layernorm_layer.gains_adam.v[idx] = v;
+
+        layer.layer.layernorm_layer.gains[idx] = gain - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * gain;
+    }
+
+    {
+        DATA_TYPE grad = layer.layer.layernorm_layer.bias_grads[idx];
+        DATA_TYPE bias = layer.layer.layernorm_layer.biases[idx];
+        DATA_TYPE m = layer.layer.layernorm_layer.biases_adam.m[idx];
+        DATA_TYPE v = layer.layer.layernorm_layer.biases_adam.v[idx];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.layernorm_layer.biases_adam.m[idx] = m;
+        layer.layer.layernorm_layer.biases_adam.v[idx] = v;
+
+        layer.layer.layernorm_layer.biases[idx] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * bias;
+    }
 }
 
 int save_layernorm_layer(Layer layer, FILE* file) {

@@ -18,7 +18,8 @@
 #define NUM_CYCLES 10
 #define DATASET_SIZE 1000000
 #define BATCH_SIZE 64
-#define LEARNING_RATE 1e-3
+#define LEARNING_RATE 3e-4
+#define WEIGHT_DECAY 1e-2
 
 int test_unembed(DATA_TYPE* probs) {
     DATA_TYPE min = 1.0;
@@ -81,6 +82,34 @@ int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
     return 0;
 }
 
+DATA_TYPE compute_cross_entropy_loss(NN* nn, DATA_TYPE* expected) {
+    DATA_TYPE* output = nn->layers[nn->num_layers - 1].output.tensor.output;
+    int tensor_size = nn->layers[nn->num_layers - 1].output.tensor.output_size;
+
+    DATA_TYPE* host_output = (DATA_TYPE*)malloc(tensor_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_expected = (DATA_TYPE*)malloc(tensor_size * sizeof(DATA_TYPE));
+
+    cudaMemcpy(host_output, output, tensor_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_expected, expected, tensor_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+
+    int vector_size = nn->layers[nn->num_layers - 1].output.tensor.tensor_dimensions[1];
+    int num_vectors = tensor_size / vector_size;
+
+    DATA_TYPE loss = 0.0f;
+    for(int i = 0; i < num_vectors; i++) {
+        for(int j = 0; j < vector_size; j++) {
+            if(host_expected[i * vector_size + j] > 0.5f) {
+                loss -= logf(fmaxf(host_output[i * vector_size + j], 1e-10f));
+                break;
+            }
+        }
+    }
+
+    free(host_output);
+    free(host_expected);
+    return loss / num_vectors;
+}
+
 int main() {
     printf("Hello, CUDA!\n");
 
@@ -136,10 +165,12 @@ int main() {
             call_nn(&nn, dataset + i * 65, 1);
             grad_nn(&nn, dataset + (i + 1) * 65);
             if((i + 1) % BATCH_SIZE == 0) {
-                update_nn(&nn, learning_rate / BATCH_SIZE);
+                update_nn(&nn, learning_rate / BATCH_SIZE, WEIGHT_DECAY);
                 zero_grads_nn(&nn);
             }
             if(i % 100 == 0) {
+                DATA_TYPE loss = compute_cross_entropy_loss(&nn, dataset + (i + 1) * 65);
+                printf("Loss: %f\n", loss);
                 test_nn(&nn, dataset, tokens, 0);
                 save_nn(&nn, "model.data");
                 printf("Processed %d samples\n", i);

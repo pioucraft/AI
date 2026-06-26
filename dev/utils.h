@@ -5,9 +5,18 @@
 #define NUM_THREADS 256
 #define TENSOR_MAX_RANK 4
 
+#define ADAMW_BETA1 0.9f
+#define ADAMW_BETA2 0.999f
+#define ADAMW_EPSILON 1e-8f
+
 #include <curand_kernel.h>
 
 void checkCudaError();
+
+typedef struct AdamW_State {
+    DATA_TYPE* m;
+    DATA_TYPE* v;
+} AdamW_State;
 
 typedef struct Convolution_Layer {
     int filter_dimensions;
@@ -18,6 +27,9 @@ typedef struct Convolution_Layer {
 
     DATA_TYPE* filter_grads;
     DATA_TYPE* bias_grads;
+
+    AdamW_State filters_adam;
+    AdamW_State biases_adam;
 } Convolution_Layer;
 
 typedef struct Pooling_Layer {
@@ -30,6 +42,9 @@ typedef struct MLP_Layer {
 
     DATA_TYPE* weight_grads;
     DATA_TYPE* bias_grads;
+
+    AdamW_State weights_adam;
+    AdamW_State biases_adam;
 } MLP_Layer;
 
 typedef struct Dropout_Layer {
@@ -44,6 +59,9 @@ typedef struct Layernorm_Layer {
 
     DATA_TYPE* gain_grads;
     DATA_TYPE* bias_grads;
+
+    AdamW_State gains_adam;
+    AdamW_State biases_adam;
 
     DATA_TYPE* means;
     DATA_TYPE* variances;
@@ -74,6 +92,10 @@ typedef struct Attention_Layer {
     DATA_TYPE* query_weight_grads;
     DATA_TYPE* key_weight_grads;
     DATA_TYPE* value_weight_grads;
+
+    AdamW_State query_adam;
+    AdamW_State key_adam;
+    AdamW_State value_adam;
 
     DATA_TYPE* queries;
     DATA_TYPE* keys;
@@ -159,6 +181,7 @@ typedef struct Layer {
 typedef struct NN {
     int num_layers;
     Layer* layers;
+    int adamw_timestep;
 } NN;
 
 #endif

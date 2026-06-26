@@ -30,6 +30,17 @@ int create_convolution_layer(Layer* layer, int input_dimensions, int output_dime
     cudaMalloc(&filter_grads, num_filters * filter_dimensions * filter_dimensions * in_channels * sizeof(DATA_TYPE));
     cudaMalloc(&bias_grads, num_filters * sizeof(DATA_TYPE));
 
+    AdamW_State filters_adam, biases_adam;
+    int filter_count = num_filters * filter_dimensions * filter_dimensions * in_channels;
+    cudaMalloc(&filters_adam.m, filter_count * sizeof(DATA_TYPE));
+    cudaMalloc(&filters_adam.v, filter_count * sizeof(DATA_TYPE));
+    cudaMemset(filters_adam.m, 0, filter_count * sizeof(DATA_TYPE));
+    cudaMemset(filters_adam.v, 0, filter_count * sizeof(DATA_TYPE));
+    cudaMalloc(&biases_adam.m, num_filters * sizeof(DATA_TYPE));
+    cudaMalloc(&biases_adam.v, num_filters * sizeof(DATA_TYPE));
+    cudaMemset(biases_adam.m, 0, num_filters * sizeof(DATA_TYPE));
+    cudaMemset(biases_adam.v, 0, num_filters * sizeof(DATA_TYPE));
+
     *layer = {
         .layer_type = LAYER_TYPE_CONVOLUTION,
         .num_in_channels = in_channels,
@@ -51,7 +62,9 @@ int create_convolution_layer(Layer* layer, int input_dimensions, int output_dime
                 .filters = filters,
                 .biases = biases,
                 .filter_grads = filter_grads,
-                .bias_grads = bias_grads
+                .bias_grads = bias_grads,
+                .filters_adam = filters_adam,
+                .biases_adam = biases_adam
             }
         }
     };
@@ -169,7 +182,7 @@ __global__ void grad_convolution_layer(Layer layer) {
 
 }
 
-__global__ void update_convolution_layer(Layer layer, float learning_rate) {
+__global__ void update_convolution_layer(Layer layer, float learning_rate, int timestep, DATA_TYPE weight_decay) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int filter = idx / (layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions);
 
@@ -178,12 +191,41 @@ __global__ void update_convolution_layer(Layer layer, float learning_rate) {
     }
 
     if(idx % (layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions) == 0) {
-        layer.layer.convolution_layer.biases[filter] -= learning_rate * layer.layer.convolution_layer.bias_grads[filter];
+        DATA_TYPE grad = layer.layer.convolution_layer.bias_grads[filter];
+        DATA_TYPE bias = layer.layer.convolution_layer.biases[filter];
+        DATA_TYPE m = layer.layer.convolution_layer.biases_adam.m[filter];
+        DATA_TYPE v = layer.layer.convolution_layer.biases_adam.v[filter];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.convolution_layer.biases_adam.m[filter] = m;
+        layer.layer.convolution_layer.biases_adam.v[filter] = v;
+
+        layer.layer.convolution_layer.biases[filter] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * bias;
     }
 
     for(int in_channel = 0; in_channel < layer.num_in_channels; in_channel++) {
         int filter_idx = filter * layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions * layer.num_in_channels + in_channel * layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions + idx % (layer.layer.convolution_layer.filter_dimensions * layer.layer.convolution_layer.filter_dimensions);
-        layer.layer.convolution_layer.filters[filter_idx] -= learning_rate * layer.layer.convolution_layer.filter_grads[filter_idx];
+
+        DATA_TYPE grad = layer.layer.convolution_layer.filter_grads[filter_idx];
+        DATA_TYPE filt = layer.layer.convolution_layer.filters[filter_idx];
+        DATA_TYPE m = layer.layer.convolution_layer.filters_adam.m[filter_idx];
+        DATA_TYPE v = layer.layer.convolution_layer.filters_adam.v[filter_idx];
+
+        m = ADAMW_BETA1 * m + (1.0f - ADAMW_BETA1) * grad;
+        v = ADAMW_BETA2 * v + (1.0f - ADAMW_BETA2) * grad * grad;
+
+        DATA_TYPE m_hat = m / (1.0f - powf(ADAMW_BETA1, timestep));
+        DATA_TYPE v_hat = v / (1.0f - powf(ADAMW_BETA2, timestep));
+
+        layer.layer.convolution_layer.filters_adam.m[filter_idx] = m;
+        layer.layer.convolution_layer.filters_adam.v[filter_idx] = v;
+
+        layer.layer.convolution_layer.filters[filter_idx] = filt - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * filt;
     }
 }
 
