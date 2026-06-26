@@ -249,11 +249,7 @@ int zero_grads_nn(NN* nn) {
 
 __global__ void grad_error(Layer output_layer, DATA_TYPE* expected_output) {
     int output_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if(output_layer.layer_type == LAYER_TYPE_SOFTMAX) {
-        if(output_idx >= output_layer.output.tensor.output_size) return;
-        DATA_TYPE error_grad = 2 * (output_layer.output.tensor.output[output_idx] - expected_output[output_idx]);
-        output_layer.output.tensor.grads[output_idx] = error_grad;
-    } else if(output_layer.layer_type == LAYER_TYPE_TANH) {
+    if(output_layer.layer_type == LAYER_TYPE_TANH) {
         if(output_idx >= output_layer.output.d1.output_size) return;
         DATA_TYPE error_grad = 2 * (output_layer.output.d1.output[output_idx] - expected_output[output_idx]);
         output_layer.output.d1.grads[output_idx] = error_grad;
@@ -264,11 +260,7 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
     for(int i = nn->num_layers - 1; i >= 0; i--) {
         Layer layer = nn->layers[i];
         if(i == nn->num_layers - 1) {
-            if(nn->layers[i].layer_type == LAYER_TYPE_SOFTMAX) {
-                int output_size = layer.output.tensor.output_size;
-                int num_blocks = output_size / NUM_THREADS + 1;
-                grad_error<<<num_blocks, NUM_THREADS>>>(layer, expected_output);
-            } else if(nn->layers[i].layer_type == LAYER_TYPE_TANH) {
+            if(nn->layers[i].layer_type == LAYER_TYPE_TANH) {
                 int output_size = layer.output.d1.output_size;
                 int num_blocks = output_size / NUM_THREADS + 1;
                 grad_error<<<num_blocks, NUM_THREADS>>>(layer, expected_output);
@@ -340,15 +332,20 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             cudaDeviceSynchronize();
             grad_layernorm_layer_step_two<<<num_blocks, NUM_THREADS>>>(layer);
         } else if(layer.layer_type == LAYER_TYPE_SOFTMAX) {
-            if(layer.input.tensor.grads != NULL) {
+            if(i == nn->num_layers - 1) {
                 int num_blocks = layer.input.tensor.input_size / NUM_THREADS + 1;
-                zero_input_grads_softmax_layer<<<num_blocks, NUM_THREADS>>>(layer);
+                grad_softmax_simplified<<<num_blocks, NUM_THREADS>>>(layer, expected_output);
+            } else {
+                if(layer.input.tensor.grads != NULL) {
+                    int num_blocks = layer.input.tensor.input_size / NUM_THREADS + 1;
+                    zero_input_grads_softmax_layer<<<num_blocks, NUM_THREADS>>>(layer);
+                    cudaDeviceSynchronize();
+                }
+                int num_blocks = layer.output.tensor.output_size / NUM_THREADS + 1;
+                grad_softmax_layer_step_1<<<num_blocks, NUM_THREADS>>>(layer);
                 cudaDeviceSynchronize();
+                grad_softmax_layer_step_2<<<num_blocks, NUM_THREADS>>>(layer);
             }
-            int num_blocks = layer.output.tensor.output_size / NUM_THREADS + 1;
-            grad_softmax_layer_step_1<<<num_blocks, NUM_THREADS>>>(layer);
-            cudaDeviceSynchronize();
-            grad_softmax_layer_step_2<<<num_blocks, NUM_THREADS>>>(layer);
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
             int v_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;

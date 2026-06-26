@@ -134,3 +134,17 @@ __global__ void grad_softmax_layer_step_2(Layer layer) {
     DATA_TYPE grad_input_through_sum = -output_value * grad_sum / layer.layer.softmax_layer.temperature;
     atomicAdd(&layer.input.tensor.grads[idx], grad_input_through_sum);
 }
+
+__global__ void grad_softmax_simplified(Layer layer, DATA_TYPE* expected_output) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(idx >= layer.input.tensor.input_size) {
+        return;
+    }
+
+    DATA_TYPE output_value = layer.output.tensor.output[idx];
+    DATA_TYPE expected_value = expected_output[idx];
+    DATA_TYPE temperature = layer.layer.softmax_layer.temperature;
+
+    layer.input.tensor.grads[idx] = (output_value - expected_value) / temperature;
+}
