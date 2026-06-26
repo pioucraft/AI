@@ -13,20 +13,22 @@
 #include "layernorm.h"
 #include "softmax.h"
 #include "../language/language.h"
+#include <math.h>
 
 #define NUM_CYCLES 10
 #define DATASET_SIZE 1000000
-#define BATCH_SIZE 1
+#define BATCH_SIZE 64
 #define LEARNING_RATE 1e-3
 
 int test_unembed(DATA_TYPE* probs) {
-    DATA_TYPE max = 0.0;
+    DATA_TYPE min = 1.0;
+    DATA_TYPE random = (DATA_TYPE)rand() / RAND_MAX;
     int predicted_token = -1;
     for(int j = 0; j < 65; j++) {
-        if(probs[j] > max) {
-            max = probs[j];
+        if(probs[j] < min && probs[j] > random) {
+            min = probs[j];
             predicted_token = j;
-        }
+        } 
     }
     return predicted_token;
 }
@@ -127,16 +129,19 @@ int main() {
 
         DATA_TYPE learning_rate = LEARNING_RATE * (1.0f - (float)cycle / NUM_CYCLES);
 
+        zero_grads_nn(&nn);
         for(int i = 0; i < DATASET_SIZE - context_length - 1; i++) {
-            zero_grads_nn(&nn);
             call_nn(&nn, dataset + i * 65, 1);
             grad_nn(&nn, dataset + (i + 1) * 65);
+            if((i + 1) % BATCH_SIZE == 0) {
+                update_nn(&nn, learning_rate / BATCH_SIZE);
+                zero_grads_nn(&nn);
+            }
             if(i % 100 == 0) {
                 test_nn(&nn, dataset, tokens, 0);
                 save_nn(&nn, "model.data");
                 printf("Processed %d samples\n", i);
             }
-            update_nn(&nn, learning_rate / BATCH_SIZE);
         }
     }
 
