@@ -21,6 +21,8 @@ int zero_grads_nn(NN* nn);
 
 int grad_nn(NN* nn, DATA_TYPE* expected_output);
 
+int clip_grads_nn(NN* nn, DATA_TYPE max_norm);
+
 int update_nn(NN* nn, DATA_TYPE learning_rate, DATA_TYPE weight_decay);
 
 int save_nn(NN* nn, const char* filename);

@@ -205,7 +205,7 @@ __global__ void update_convolution_layer(Layer layer, float learning_rate, int t
         layer.layer.convolution_layer.biases_adam.m[filter] = m;
         layer.layer.convolution_layer.biases_adam.v[filter] = v;
 
-        layer.layer.convolution_layer.biases[filter] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * bias;
+        layer.layer.convolution_layer.biases[filter] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * bias;
     }
 
     for(int in_channel = 0; in_channel < layer.num_in_channels; in_channel++) {
@@ -225,7 +225,7 @@ __global__ void update_convolution_layer(Layer layer, float learning_rate, int t
         layer.layer.convolution_layer.filters_adam.m[filter_idx] = m;
         layer.layer.convolution_layer.filters_adam.v[filter_idx] = v;
 
-        layer.layer.convolution_layer.filters[filter_idx] = filt - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * filt;
+        layer.layer.convolution_layer.filters[filter_idx] = filt - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * filt;
     }
 }
 

@@ -99,7 +99,7 @@ int main() {
         fprintf(accuracy_file, "cycle %d: %.2f%%\n", cycle, (float)correct_predictions / TEST_DATASET_SIZE * 100.0f);
         fclose(accuracy_file);
 
-        DATA_TYPE learning_rate = LEARNING_RATE * (1.0f - (float)cycle / NUM_CYCLES);
+        DATA_TYPE learning_rate = LEARNING_RATE;
 
         for(int i = 0; i < DATASET_SIZE - BATCH_SIZE; i += BATCH_SIZE) {
             zero_grads_nn(&nn);
@@ -110,7 +110,8 @@ int main() {
                     printf("Processed %d samples\n", i + j);
                 }
             }
-            update_nn(&nn, learning_rate / BATCH_SIZE, WEIGHT_DECAY);
+            clip_grads_nn(&nn, 1.0f);
+            update_nn(&nn, learning_rate, WEIGHT_DECAY);
         }
         save_nn(&nn, "model.data");
         

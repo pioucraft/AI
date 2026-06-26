@@ -208,7 +208,7 @@ __global__ void update_mlp_layer(Layer layer, DATA_TYPE learning_rate, int times
         layer.layer.mlp_layer.biases_adam.m[neuron_idx] = m;
         layer.layer.mlp_layer.biases_adam.v[neuron_idx] = v;
 
-        layer.layer.mlp_layer.biases[neuron_idx] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * bias;
+        layer.layer.mlp_layer.biases[neuron_idx] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * bias;
     }
 
     DATA_TYPE grad = layer.layer.mlp_layer.weight_grads[idx];
@@ -225,7 +225,7 @@ __global__ void update_mlp_layer(Layer layer, DATA_TYPE learning_rate, int times
     layer.layer.mlp_layer.weights_adam.m[idx] = m;
     layer.layer.mlp_layer.weights_adam.v[idx] = v;
 
-    layer.layer.mlp_layer.weights[idx] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
+    layer.layer.mlp_layer.weights[idx] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * weight;
 }
 
 int save_mlp_layer(Layer layer, FILE* file) {

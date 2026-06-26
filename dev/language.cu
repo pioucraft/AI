@@ -158,14 +158,15 @@ int main() {
     for(int cycle = 0; cycle < NUM_CYCLES; cycle++) {
         printf("Cycle %d\n", cycle);
 
-        DATA_TYPE learning_rate = LEARNING_RATE * (1.0f - (float)cycle / NUM_CYCLES);
+        DATA_TYPE learning_rate = LEARNING_RATE;
 
         zero_grads_nn(&nn);
         for(int i = 0; i < DATASET_SIZE - context_length - 1; i++) {
             call_nn(&nn, dataset + i * 65, 1);
             grad_nn(&nn, dataset + (i + 1) * 65);
             if((i + 1) % BATCH_SIZE == 0) {
-                update_nn(&nn, learning_rate / BATCH_SIZE, WEIGHT_DECAY);
+                clip_grads_nn(&nn, 1.0f);
+                update_nn(&nn, learning_rate, WEIGHT_DECAY);
                 zero_grads_nn(&nn);
             }
             if(i % 100 == 0) {

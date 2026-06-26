@@ -549,7 +549,7 @@ __global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate, int
         layer.layer.attention_layer.query_adam.m[idx] = m;
         layer.layer.attention_layer.query_adam.v[idx] = v;
 
-        layer.layer.attention_layer.query_weights[idx] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
+        layer.layer.attention_layer.query_weights[idx] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * weight;
     } else if (idx < 2 * qk_weight_size) {
         int off = idx - qk_weight_size;
 
@@ -567,7 +567,7 @@ __global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate, int
         layer.layer.attention_layer.key_adam.m[off] = m;
         layer.layer.attention_layer.key_adam.v[off] = v;
 
-        layer.layer.attention_layer.key_weights[off] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
+        layer.layer.attention_layer.key_weights[off] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * weight;
     } else {
         int off = idx - 2 * qk_weight_size;
 
@@ -585,7 +585,7 @@ __global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate, int
         layer.layer.attention_layer.value_adam.m[off] = m;
         layer.layer.attention_layer.value_adam.v[off] = v;
 
-        layer.layer.attention_layer.value_weights[off] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * weight;
+        layer.layer.attention_layer.value_weights[off] = weight - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * weight;
     }
 }
 

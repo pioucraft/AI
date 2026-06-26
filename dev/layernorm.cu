@@ -291,7 +291,7 @@ __global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate, int
         layer.layer.layernorm_layer.gains_adam.m[idx] = m;
         layer.layer.layernorm_layer.gains_adam.v[idx] = v;
 
-        layer.layer.layernorm_layer.gains[idx] = gain - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * gain;
+        layer.layer.layernorm_layer.gains[idx] = gain - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * gain;
     }
 
     {
@@ -309,7 +309,7 @@ __global__ void update_layernorm_layer(Layer layer, DATA_TYPE learning_rate, int
         layer.layer.layernorm_layer.biases_adam.m[idx] = m;
         layer.layer.layernorm_layer.biases_adam.v[idx] = v;
 
-        layer.layer.layernorm_layer.biases[idx] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) + learning_rate * weight_decay * bias;
+        layer.layer.layernorm_layer.biases[idx] = bias - learning_rate * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - learning_rate * weight_decay * bias;
     }
 }
 
