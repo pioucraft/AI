@@ -438,6 +438,8 @@ int save_nn(NN* nn, const char* filename) {
             save_convolution_layer(layer, file);
         } else if(layer.layer_type == LAYER_TYPE_LAYERNORM) {
             save_layernorm_layer(layer, file);
+        } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
+            save_attention_layer(layer, file);
         }
     }
 
@@ -460,6 +462,8 @@ int load_nn(NN* nn, const char* filename) {
             load_convolution_layer(layer, file);
         } else if(layer->layer_type == LAYER_TYPE_LAYERNORM) {
             load_layernorm_layer(layer, file);
+        } else if(layer->layer_type == LAYER_TYPE_ATTENTION) {
+            load_attention_layer(layer, file);
         }
     }
 

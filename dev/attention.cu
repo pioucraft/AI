@@ -522,3 +522,57 @@ __global__ void update_attention_layer(Layer layer, DATA_TYPE learning_rate) {
         layer.layer.attention_layer.value_weights[idx - 2 * qk_weight_size] -= learning_rate * layer.layer.attention_layer.value_weight_grads[idx - 2 * qk_weight_size];
     }
 }
+
+int save_attention_layer(Layer layer, FILE* file) {
+    int embedding_size = layer.layer.attention_layer.embedding_size;
+    int query_key_size = layer.layer.attention_layer.query_key_size;
+    int num_heads = layer.layer.attention_layer.num_heads;
+
+    int qk_weight_size = embedding_size * query_key_size * num_heads;
+    int v_weight_size = embedding_size * embedding_size * num_heads;
+
+    DATA_TYPE* host_query_weights = (DATA_TYPE*)malloc(qk_weight_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_key_weights = (DATA_TYPE*)malloc(qk_weight_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_value_weights = (DATA_TYPE*)malloc(v_weight_size * sizeof(DATA_TYPE));
+
+    cudaMemcpy(host_query_weights, layer.layer.attention_layer.query_weights, qk_weight_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_key_weights, layer.layer.attention_layer.key_weights, qk_weight_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_value_weights, layer.layer.attention_layer.value_weights, v_weight_size * sizeof(DATA_TYPE), cudaMemcpyDeviceToHost);
+
+    fwrite(host_query_weights, sizeof(DATA_TYPE), qk_weight_size, file);
+    fwrite(host_key_weights, sizeof(DATA_TYPE), qk_weight_size, file);
+    fwrite(host_value_weights, sizeof(DATA_TYPE), v_weight_size, file);
+
+    free(host_query_weights);
+    free(host_key_weights);
+    free(host_value_weights);
+
+    return 0;
+}
+
+int load_attention_layer(Layer* layer, FILE* file) {
+    int embedding_size = layer->layer.attention_layer.embedding_size;
+    int query_key_size = layer->layer.attention_layer.query_key_size;
+    int num_heads = layer->layer.attention_layer.num_heads;
+
+    int qk_weight_size = embedding_size * query_key_size * num_heads;
+    int v_weight_size = embedding_size * embedding_size * num_heads;
+
+    DATA_TYPE* host_query_weights = (DATA_TYPE*)malloc(qk_weight_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_key_weights = (DATA_TYPE*)malloc(qk_weight_size * sizeof(DATA_TYPE));
+    DATA_TYPE* host_value_weights = (DATA_TYPE*)malloc(v_weight_size * sizeof(DATA_TYPE));
+
+    fread(host_query_weights, sizeof(DATA_TYPE), qk_weight_size, file);
+    fread(host_key_weights, sizeof(DATA_TYPE), qk_weight_size, file);
+    fread(host_value_weights, sizeof(DATA_TYPE), v_weight_size, file);
+
+    cudaMemcpy(layer->layer.attention_layer.query_weights, host_query_weights, qk_weight_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+    cudaMemcpy(layer->layer.attention_layer.key_weights, host_key_weights, qk_weight_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+    cudaMemcpy(layer->layer.attention_layer.value_weights, host_value_weights, v_weight_size * sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
+
+    free(host_query_weights);
+    free(host_key_weights);
+    free(host_value_weights);
+
+    return 0;
+}

@@ -17,7 +17,7 @@
 #define NUM_CYCLES 10
 #define DATASET_SIZE 1000000
 #define BATCH_SIZE 1
-#define LEARNING_RATE 1e-4
+#define LEARNING_RATE 1e-3
 
 int test_unembed(DATA_TYPE* probs) {
     DATA_TYPE max = 0.0;
@@ -133,6 +133,7 @@ int main() {
             grad_nn(&nn, dataset + (i + 1) * 65);
             if(i % 100 == 0) {
                 test_nn(&nn, dataset, tokens, 0);
+                save_nn(&nn, "model.data");
                 printf("Processed %d samples\n", i);
             }
             update_nn(&nn, learning_rate / BATCH_SIZE);
