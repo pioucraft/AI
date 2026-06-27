@@ -13,14 +13,13 @@ int create_convolution_layer(Layer* layer, int input_dimensions, int output_dime
     cudaMalloc(&filters, num_filters * filter_dimensions * filter_dimensions * in_channels * sizeof(DATA_TYPE));
     cudaMalloc(&biases, num_filters * sizeof(DATA_TYPE));
 
-    DATA_TYPE deviation = sqrt(2.0 / (filter_dimensions * filter_dimensions * in_channels));
     for(int i = 0; i < num_filters * filter_dimensions * filter_dimensions * in_channels; i++) {
-        DATA_TYPE filter = (DATA_TYPE)((DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation);
+        DATA_TYPE filter = normal_sample(0.0f, 0.02f);
         cudaMemcpy(filters + i, &filter, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
     }
 
     for(int i = 0; i < num_filters; i++) {
-        DATA_TYPE bias = (DATA_TYPE)((DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation);
+        DATA_TYPE bias = 0.0f;
         cudaMemcpy(biases + i, &bias, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
     }
 

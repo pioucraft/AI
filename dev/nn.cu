@@ -3,6 +3,7 @@
 
 #include "convolution.h"
 #include "dropout.h"
+#include "gelu.h"
 #include "mlp.h"
 #include "nn.h"
 #include "pooling.h"
@@ -35,7 +36,7 @@ int create_nn(NN* nn) {
 
             layer->output.tensor.output = current_input;
             layer->output.tensor.grads = current_input_grads;
-        } else if(layer->layer_type == LAYER_TYPE_RELU || layer->layer_type == LAYER_TYPE_TANH || layer->layer_type == LAYER_TYPE_DROPOUT) { // 1d input and 1d output
+        } else if(layer->layer_type == LAYER_TYPE_RELU || layer->layer_type == LAYER_TYPE_TANH || layer->layer_type == LAYER_TYPE_DROPOUT || layer->layer_type == LAYER_TYPE_GELU) { // 1d input and 1d output
             layer->input.d1.input = current_input;
             layer->input.d1.grads = current_input_grads;
 
@@ -108,6 +109,10 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
             relu_forward<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
+        } else if(layer.layer_type == LAYER_TYPE_GELU) {
+            int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
+            gelu_forward<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
         } else if(layer.layer_type == LAYER_TYPE_TANH) {
             int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
             tanh_forward<<<num_blocks, NUM_THREADS>>>(layer);
@@ -143,7 +148,8 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             cudaDeviceSynchronize();
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
-            int v_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int val_size = layer.layer.attention_layer.query_key_size;
+            int v_size = layer.layer.attention_layer.context_length * val_size * layer.layer.attention_layer.num_heads;
             int scores_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
             int sums_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
             int output_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
@@ -176,6 +182,23 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             int num_blocks_output = output_size / NUM_THREADS + 1;
             attention_forward_value_weighted_sum<<<num_blocks_output, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
+
+            attention_forward_out_proj<<<num_blocks_output, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+        }
+
+        if(i == nn->attn_residual_layer_idx && nn->attn_residual_layer_idx > 0) {
+            int total = nn->layers[i].output.tensor.output_size;
+            int nb = (total + NUM_THREADS - 1) / NUM_THREADS;
+            add_residual<<<nb, NUM_THREADS>>>(nn->layers[i].output.tensor.output,
+                nn->layers[0].output.tensor.output, total);
+        }
+
+        if(i == nn->ffn_residual_layer_idx && nn->attn_residual_layer_idx >= 0) {
+            int total = nn->layers[i].output.tensor.output_size;
+            int nb = (total + NUM_THREADS - 1) / NUM_THREADS;
+            add_residual<<<nb, NUM_THREADS>>>(nn->layers[i].output.tensor.output,
+                nn->layers[nn->attn_residual_layer_idx].output.tensor.output, total);
         }
     }
 
@@ -242,8 +265,10 @@ int zero_grads_nn(NN* nn) {
             zero_grads_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer);
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
-            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
-            int num_blocks = (qk_weight_size + qk_weight_size + v_weight_size) / NUM_THREADS + 1;
+            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int out_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size;
+            int total = qk_weight_size + qk_weight_size + v_weight_size + out_weight_size + layer.layer.attention_layer.embedding_size;
+            int num_blocks = total / NUM_THREADS + 1;
             zero_grads_attention_layer<<<num_blocks, NUM_THREADS>>>(layer);
         }
     }
@@ -316,6 +341,14 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             }
             int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
             grad_relu_layer<<<num_blocks, NUM_THREADS>>>(layer);
+        } else if(layer.layer_type == LAYER_TYPE_GELU) {
+            if(layer.input.d1.grads != NULL) {
+                int num_blocks = layer.input.d1.input_size / NUM_THREADS + 1;
+                zero_input_grads_gelu_layer<<<num_blocks, NUM_THREADS>>>(layer);
+                cudaDeviceSynchronize();
+            }
+            int num_blocks = layer.output.d1.output_size / NUM_THREADS + 1;
+            grad_gelu_layer<<<num_blocks, NUM_THREADS>>>(layer);
         } else if(layer.layer_type == LAYER_TYPE_TANH) {
             if(layer.input.d1.grads != NULL) {
                 int num_blocks = layer.input.d1.input_size / NUM_THREADS + 1;
@@ -345,7 +378,7 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
         } else if(layer.layer_type == LAYER_TYPE_SOFTMAX) {
             if(i == nn->num_layers - 1) {
                 int num_blocks = layer.input.tensor.input_size / NUM_THREADS + 1;
-                grad_softmax_simplified<<<num_blocks, NUM_THREADS>>>(layer, expected_output);
+                grad_softmax_simplified_scaled<<<num_blocks, NUM_THREADS>>>(layer, expected_output, nn->grad_scale);
             } else {
                 if(layer.input.tensor.grads != NULL) {
                     int num_blocks = layer.input.tensor.input_size / NUM_THREADS + 1;
@@ -359,20 +392,25 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
             }
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
-            int v_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int val_size = layer.layer.attention_layer.query_key_size;
+            int v_size = layer.layer.attention_layer.context_length * val_size * layer.layer.attention_layer.num_heads;
             int scores_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
             int sums_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads;
             int output_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
 
             if(layer.input.tensor.grads != NULL) {
                 int input_size = layer.input.tensor.input_size;
-                int total = input_size + qk_size + v_size + scores_size + scores_size + scores_size + sums_size;
+                int ws_size = layer.layer.attention_layer.context_length * layer.layer.attention_layer.embedding_size;
+                int total = input_size + qk_size + v_size + scores_size + scores_size + scores_size + sums_size + ws_size;
                 int num_blocks = total / NUM_THREADS + 1;
                 zero_input_grads_attention_layer<<<num_blocks, NUM_THREADS>>>(layer);
                 cudaDeviceSynchronize();
             }
 
             int num_blocks_output = output_size / NUM_THREADS + 1;
+            grad_attention_layer_out_proj<<<num_blocks_output, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
             grad_attention_layer_value_weighted_sum<<<num_blocks_output, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
 
@@ -395,6 +433,23 @@ int grad_nn(NN* nn, DATA_TYPE* expected_output) {
         }
 
         cudaDeviceSynchronize();
+
+        if(nn->ffn_residual_layer_idx >= 0 && i == nn->attn_residual_layer_idx + 1) {
+            Layer attn_layer = nn->layers[nn->attn_residual_layer_idx];
+            Layer ffn_layer = nn->layers[nn->ffn_residual_layer_idx];
+            int total = attn_layer.output.tensor.output_size;
+            int nb = (total + NUM_THREADS - 1) / NUM_THREADS;
+            add_residual_grad<<<nb, NUM_THREADS>>>(attn_layer.output.tensor.grads,
+                ffn_layer.output.tensor.grads, total);
+        }
+        if(nn->attn_residual_layer_idx >= 0 && i == nn->attn_residual_layer_idx - 1) {
+            Layer attn_layer = nn->layers[nn->attn_residual_layer_idx];
+            Layer emb_layer = nn->layers[0];
+            int total = attn_layer.output.tensor.output_size;
+            int nb = (total + NUM_THREADS - 1) / NUM_THREADS;
+            add_residual_grad<<<nb, NUM_THREADS>>>(emb_layer.output.tensor.grads,
+                attn_layer.output.tensor.grads, total);
+        }
     }
 
     if(nn->pos_encoding != NULL) {
@@ -427,8 +482,10 @@ int update_nn(NN* nn, DATA_TYPE learning_rate, DATA_TYPE weight_decay) {
             update_layernorm_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate, nn->adamw_timestep, weight_decay);
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
-            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
-            int num_blocks = (qk_weight_size + qk_weight_size + v_weight_size) / NUM_THREADS + 1;
+            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int out_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size;
+            int total = qk_weight_size + qk_weight_size + v_weight_size + out_weight_size + layer.layer.attention_layer.embedding_size;
+            int num_blocks = total / NUM_THREADS + 1;
             update_attention_layer<<<num_blocks, NUM_THREADS>>>(layer, learning_rate, nn->adamw_timestep, weight_decay);
         }
     }
@@ -585,7 +642,8 @@ int clip_grads_nn(NN* nn, DATA_TYPE max_norm) {
             }
         } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
             int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
-            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+            int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
+            int out_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size;
 
             if(layer.layer.attention_layer.query_weight_grads != NULL) {
                 int num_blocks = qk_weight_size / NUM_THREADS + 1;
@@ -598,6 +656,14 @@ int clip_grads_nn(NN* nn, DATA_TYPE max_norm) {
             if(layer.layer.attention_layer.value_weight_grads != NULL) {
                 int num_blocks = v_weight_size / NUM_THREADS + 1;
                 grad_sq_sum<<<num_blocks, NUM_THREADS>>>(layer.layer.attention_layer.value_weight_grads, v_weight_size, d_sq_sum);
+            }
+            if(layer.layer.attention_layer.out_weight_grads != NULL) {
+                int num_blocks = out_weight_size / NUM_THREADS + 1;
+                grad_sq_sum<<<num_blocks, NUM_THREADS>>>(layer.layer.attention_layer.out_weight_grads, out_weight_size, d_sq_sum);
+            }
+            if(layer.layer.attention_layer.out_bias_grads != NULL) {
+                int num_blocks = layer.layer.attention_layer.embedding_size / NUM_THREADS + 1;
+                grad_sq_sum<<<num_blocks, NUM_THREADS>>>(layer.layer.attention_layer.out_bias_grads, layer.layer.attention_layer.embedding_size, d_sq_sum);
             }
         }
     }
@@ -659,6 +725,7 @@ int clip_grads_nn(NN* nn, DATA_TYPE max_norm) {
             } else if(layer.layer_type == LAYER_TYPE_ATTENTION) {
                 int qk_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.query_key_size * layer.layer.attention_layer.num_heads;
                 int v_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.num_heads;
+                int out_weight_size = layer.layer.attention_layer.embedding_size * layer.layer.attention_layer.embedding_size;
 
                 if(layer.layer.attention_layer.query_weight_grads != NULL) {
                     int num_blocks = qk_weight_size / NUM_THREADS + 1;
@@ -671,6 +738,14 @@ int clip_grads_nn(NN* nn, DATA_TYPE max_norm) {
                 if(layer.layer.attention_layer.value_weight_grads != NULL) {
                     int num_blocks = v_weight_size / NUM_THREADS + 1;
                     scale_grads<<<num_blocks, NUM_THREADS>>>(layer.layer.attention_layer.value_weight_grads, v_weight_size, scale);
+                }
+                if(layer.layer.attention_layer.out_weight_grads != NULL) {
+                    int num_blocks = out_weight_size / NUM_THREADS + 1;
+                    scale_grads<<<num_blocks, NUM_THREADS>>>(layer.layer.attention_layer.out_weight_grads, out_weight_size, scale);
+                }
+                if(layer.layer.attention_layer.out_bias_grads != NULL) {
+                    int num_blocks = layer.layer.attention_layer.embedding_size / NUM_THREADS + 1;
+                    scale_grads<<<num_blocks, NUM_THREADS>>>(layer.layer.attention_layer.out_bias_grads, layer.layer.attention_layer.embedding_size, scale);
                 }
             }
         }
@@ -722,4 +797,18 @@ __global__ void update_pos_encoding(DATA_TYPE* pos, DATA_TYPE* pos_grads, AdamW_
     adam.v[idx] = v;
 
     pos[idx] = weight - lr * m_hat / (sqrtf(v_hat) + ADAMW_EPSILON) - lr * wd * weight;
+}
+
+__global__ void add_residual(DATA_TYPE* dst, DATA_TYPE* src, int total_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < total_size) {
+        dst[idx] += src[idx];
+    }
+}
+
+__global__ void add_residual_grad(DATA_TYPE* dst_grad, DATA_TYPE* src_grad, int total_size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < total_size) {
+        atomicAdd(&dst_grad[idx], src_grad[idx]);
+    }
 }

@@ -148,3 +148,17 @@ __global__ void grad_softmax_simplified(Layer layer, DATA_TYPE* expected_output)
 
     layer.input.tensor.grads[idx] = (output_value - expected_value) / temperature;
 }
+
+__global__ void grad_softmax_simplified_scaled(Layer layer, DATA_TYPE* expected_output, DATA_TYPE scale) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(idx >= layer.input.tensor.input_size) {
+        return;
+    }
+
+    DATA_TYPE output_value = layer.output.tensor.output[idx];
+    DATA_TYPE expected_value = expected_output[idx];
+    DATA_TYPE temperature = layer.layer.softmax_layer.temperature;
+
+    layer.input.tensor.grads[idx] = (output_value - expected_value) / temperature * scale;
+}

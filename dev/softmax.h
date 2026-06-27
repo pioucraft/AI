@@ -22,5 +22,6 @@ __global__ void grad_softmax_layer_step_1(Layer layer);
 __global__ void grad_softmax_layer_step_2(Layer layer);
 
 __global__ void grad_softmax_simplified(Layer layer, DATA_TYPE* expected_output);
+__global__ void grad_softmax_simplified_scaled(Layer layer, DATA_TYPE* expected_output, DATA_TYPE scale);
 
 #endif

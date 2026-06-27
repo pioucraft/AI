@@ -27,14 +27,13 @@ int create_mlp_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR
     cudaMalloc(&weights, input_feature_size * output_feature_size * sizeof(DATA_TYPE));
     cudaMalloc(&biases, output_feature_size * sizeof(DATA_TYPE));
 
-    DATA_TYPE deviation = sqrt(2.0 / (input_feature_size));
     for(int i = 0; i < input_feature_size * output_feature_size; i++) {
-        DATA_TYPE weight = (DATA_TYPE)((DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation);
+        DATA_TYPE weight = normal_sample(0.0f, 0.02f);
         cudaMemcpy(weights + i, &weight, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
     }
 
     for(int i = 0; i < output_feature_size; i++) {
-        DATA_TYPE bias = (DATA_TYPE)((DATA_TYPE)rand() / RAND_MAX * deviation * 2 - deviation);
+        DATA_TYPE bias = 0.0f;
         cudaMemcpy(biases + i, &bias, sizeof(DATA_TYPE), cudaMemcpyHostToDevice);
     }
 

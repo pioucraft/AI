@@ -12,6 +12,8 @@
 #include <curand_kernel.h>
 
 void checkCudaError();
+int check_nan(DATA_TYPE* buffer, int size, const char* name);
+DATA_TYPE normal_sample(DATA_TYPE mean, DATA_TYPE std);
 
 typedef struct AdamW_State {
     DATA_TYPE* m;
@@ -117,6 +119,16 @@ typedef struct Attention_Layer {
     DATA_TYPE* value_grads;
     DATA_TYPE* query_grads;
     DATA_TYPE* key_grads;
+
+    DATA_TYPE* out_weight;
+    DATA_TYPE* out_bias;
+    DATA_TYPE* out_weight_grads;
+    DATA_TYPE* out_bias_grads;
+    AdamW_State out_weight_adam;
+    AdamW_State out_bias_adam;
+
+    DATA_TYPE* weighted_sum_output;
+    DATA_TYPE* weighted_sum_grads;
 } Attention_Layer;
 
 typedef struct Layer {
@@ -185,6 +197,10 @@ typedef struct NN {
     DATA_TYPE* pos_encoding;
     DATA_TYPE* pos_encoding_grads;
     AdamW_State pos_encoding_adam;
+
+    int attn_residual_layer_idx;
+    int ffn_residual_layer_idx;
+    DATA_TYPE grad_scale;
 } NN;
 
 #endif
