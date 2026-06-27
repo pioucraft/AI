@@ -58,7 +58,7 @@ int load_language_dataset(const char* dataset_path, int dataset_size, DATA_TYPE*
     
     for(int i = 0; i < strlen(file_content); i++) {
         if(file_content[i] == ' ') {
-            file_content[i] = '_';
+            // file_content[i] = '_';
         }
     }
 
