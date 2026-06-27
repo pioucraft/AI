@@ -152,6 +152,7 @@ int main(int argc, char* argv[]) {
     printf("\x1b[31m=== Input (random %d-char snippet, temperature=%.2f) ===\x1b[0m\n", CONTEXT_LENGTH, temperature);
     printf("%s\n", input_text);
     printf("\x1b[31m=== Generated %d chars ===\x1b[0m\n", num_chars);
+    fflush(stdout);
 
     int softmax_idx = nn.num_layers - 1;
     int lm_head_idx = nn.num_layers - 2;
@@ -166,7 +167,6 @@ int main(int argc, char* argv[]) {
 
     int encode_blocks = (TOKENS_SIZE + 255) / 256;
 
-    char output_text[num_chars + 1];
     for(int step = 0; step < num_chars; step++) {
         call_nn(&nn, device_context, 0);
 
@@ -179,7 +179,9 @@ int main(int argc, char* argv[]) {
         int predicted_token;
         cudaMemcpy(&predicted_token, d_predicted_token, sizeof(int), cudaMemcpyDeviceToHost);
 
-        output_text[step] = untokenizer(predicted_token, tokens);
+        char c = untokenizer(predicted_token, tokens);
+        putchar(c);
+        fflush(stdout);
 
         cudaMemcpy(device_context, device_context + TOKENS_SIZE,
                    sizeof(DATA_TYPE) * (CONTEXT_LENGTH - 1) * TOKENS_SIZE,
@@ -188,10 +190,8 @@ int main(int argc, char* argv[]) {
         one_hot_encode<<<encode_blocks, 256>>>(device_context, CONTEXT_LENGTH, TOKENS_SIZE, predicted_token);
         cudaDeviceSynchronize();
     }
-    output_text[num_chars] = '\0';
 
-    printf("%s\n", output_text);
-    printf("\x1b[31m========================================\x1b[0m\n");
+    printf("\n\x1b[31m========================================\x1b[0m\n");
 
     cudaFree(device_context);
     cudaFree(d_rng_state);
