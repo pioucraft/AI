@@ -142,6 +142,9 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
             cudaDeviceSynchronize();
 
             int num_blocks = layer.output.tensor.output_size / NUM_THREADS + 1;
+            softmax_compute_max<<<num_blocks, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
             softmax_compute_exps<<<num_blocks, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
             softmax_compute_outputs<<<num_blocks, NUM_THREADS>>>(layer);
@@ -171,6 +174,9 @@ int call_nn(NN* nn, DATA_TYPE* input, int run_dropout) {
 
             int num_blocks_sums = sums_size / NUM_THREADS + 1;
             attention_softmax_zero_exp_sums<<<num_blocks_sums, NUM_THREADS>>>(layer);
+            cudaDeviceSynchronize();
+
+            attention_softmax_compute_max<<<num_blocks_scores, NUM_THREADS>>>(layer);
             cudaDeviceSynchronize();
 
             attention_softmax_compute_exps<<<num_blocks_scores, NUM_THREADS>>>(layer);

@@ -21,22 +21,47 @@
 #define FFN_HIDDEN_SIZE 512
 #define DATASET_SIZE 1000000
 
-int sample_from_probs(DATA_TYPE* probs, int n) {
-    DATA_TYPE r = (DATA_TYPE)rand() / RAND_MAX;
-    DATA_TYPE cumulative = 0.0;
-    for(int i = 0; i < n; i++) {
-        cumulative += probs[i];
-        if(cumulative >= r) return i;
-    }
-    return n - 1;
+__device__ unsigned int lcg_next(unsigned int* state) {
+    *state = *state * 1103515245 + 12345;
+    return *state;
 }
 
-int argmax(DATA_TYPE* probs, int n) {
-    int best = 0;
-    for(int i = 1; i < n; i++) {
-        if(probs[i] > probs[best]) best = i;
+__global__ void sample_token(unsigned int* rng_state, DATA_TYPE* probs, DATA_TYPE* logits,
+                             int context_length, int tokens_size, int* output_token,
+                             DATA_TYPE temperature) {
+    DATA_TYPE* last_probs = probs + (context_length - 1) * tokens_size;
+    DATA_TYPE* last_logits = logits + (context_length - 1) * tokens_size;
+    int token;
+
+    if(temperature == 0.0f) {
+        DATA_TYPE max_val = last_logits[0];
+        token = 0;
+        for(int i = 1; i < tokens_size; i++) {
+            if(last_logits[i] > max_val) {
+                max_val = last_logits[i];
+                token = i;
+            }
+        }
+    } else {
+        DATA_TYPE r = (DATA_TYPE)lcg_next(rng_state) / (DATA_TYPE)UINT_MAX;
+        DATA_TYPE cumulative = 0.0;
+        token = tokens_size - 1;
+        for(int i = 0; i < tokens_size; i++) {
+            cumulative += last_probs[i];
+            if(cumulative >= r) {
+                token = i;
+                break;
+            }
+        }
     }
-    return best;
+
+    *output_token = token;
+}
+
+__global__ void one_hot_encode(DATA_TYPE* context, int context_length, int tokens_size, int token) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= tokens_size) return;
+    context[(context_length - 1) * tokens_size + idx] = (idx == token) ? 1.0 : 0.0;
 }
 
 int build_nn(NN* nn, Layer** layers_out) {
@@ -122,50 +147,55 @@ int main(int argc, char* argv[]) {
         }
     }
     input_text[CONTEXT_LENGTH] = '\0';
+    free(host_context);
 
     printf("\x1b[31m=== Input (random %d-char snippet, temperature=%.2f) ===\x1b[0m\n", CONTEXT_LENGTH, temperature);
     printf("%s\n", input_text);
     printf("\x1b[31m=== Generated %d chars ===\x1b[0m\n", num_chars);
 
     int softmax_idx = nn.num_layers - 1;
+    int lm_head_idx = nn.num_layers - 2;
     nn.layers[softmax_idx].layer.softmax_layer.temperature = temperature;
+
+    unsigned int* d_rng_state;
+    int* d_predicted_token;
+    cudaMalloc(&d_rng_state, sizeof(unsigned int));
+    cudaMalloc(&d_predicted_token, sizeof(int));
+    unsigned int init_seed = time(NULL);
+    cudaMemcpy(d_rng_state, &init_seed, sizeof(unsigned int), cudaMemcpyHostToDevice);
+
+    int encode_blocks = (TOKENS_SIZE + 255) / 256;
 
     char output_text[num_chars + 1];
     for(int step = 0; step < num_chars; step++) {
         call_nn(&nn, device_context, 0);
 
-        cudaMemcpy(host_context + (CONTEXT_LENGTH - 1) * TOKENS_SIZE,
-                   nn.layers[softmax_idx].output.tensor.output + (CONTEXT_LENGTH - 1) * TOKENS_SIZE,
-                   sizeof(DATA_TYPE) * TOKENS_SIZE,
-                   cudaMemcpyDeviceToHost);
+        sample_token<<<1, 1>>>(d_rng_state,
+            nn.layers[softmax_idx].output.tensor.output,
+            nn.layers[lm_head_idx].output.tensor.output,
+            CONTEXT_LENGTH, TOKENS_SIZE, d_predicted_token, temperature);
+        cudaDeviceSynchronize();
 
         int predicted_token;
-        if(temperature == 0.0f) {
-            predicted_token = argmax(host_context + (CONTEXT_LENGTH - 1) * TOKENS_SIZE, TOKENS_SIZE);
-        } else {
-            predicted_token = sample_from_probs(host_context + (CONTEXT_LENGTH - 1) * TOKENS_SIZE, TOKENS_SIZE);
-        }
+        cudaMemcpy(&predicted_token, d_predicted_token, sizeof(int), cudaMemcpyDeviceToHost);
 
         output_text[step] = untokenizer(predicted_token, tokens);
 
-        memmove(host_context, host_context + TOKENS_SIZE,
-                sizeof(DATA_TYPE) * (CONTEXT_LENGTH - 1) * TOKENS_SIZE);
+        cudaMemcpy(device_context, device_context + TOKENS_SIZE,
+                   sizeof(DATA_TYPE) * (CONTEXT_LENGTH - 1) * TOKENS_SIZE,
+                   cudaMemcpyDeviceToDevice);
 
-        for(int j = 0; j < TOKENS_SIZE; j++) {
-            host_context[(CONTEXT_LENGTH - 1) * TOKENS_SIZE + j] =
-                (predicted_token == j) ? 1.0 : 0.0;
-        }
-
-        cudaMemcpy(device_context, host_context,
-                   sizeof(DATA_TYPE) * CONTEXT_LENGTH * TOKENS_SIZE, cudaMemcpyHostToDevice);
+        one_hot_encode<<<encode_blocks, 256>>>(device_context, CONTEXT_LENGTH, TOKENS_SIZE, predicted_token);
+        cudaDeviceSynchronize();
     }
     output_text[num_chars] = '\0';
 
     printf("%s\n", output_text);
     printf("\x1b[31m========================================\x1b[0m\n");
 
-    free(host_context);
     cudaFree(device_context);
+    cudaFree(d_rng_state);
+    cudaFree(d_predicted_token);
     cudaFree(nn.pos_encoding);
     cudaFree(nn.pos_encoding_grads);
     free(layers);

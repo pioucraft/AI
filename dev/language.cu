@@ -21,64 +21,96 @@
 #define LEARNING_RATE 3e-4
 #define WEIGHT_DECAY 0.0f
 
-int test_unembed(DATA_TYPE* probs) {
-    DATA_TYPE min = 1.0;
-    DATA_TYPE random = (DATA_TYPE)rand() / RAND_MAX;
+#define CONTEXT_LENGTH 128
+#define TOKENS_SIZE 65
+
+__device__ unsigned int lcg_next(unsigned int* state) {
+    *state = *state * 1103515245 + 12345;
+    return *state;
+}
+
+__global__ void sample_token_gpu(unsigned int* rng_state, DATA_TYPE* probs,
+                                  int tokens_size, int* output_token) {
+    DATA_TYPE r = (DATA_TYPE)lcg_next(rng_state) / (DATA_TYPE)UINT_MAX;
     DATA_TYPE cumulative = 0.0;
-    int predicted_token = -1;
-    for(int j = 0; j < 65; j++) {
-        cumulative += probs[j];
-        if(cumulative >= random) {
-            predicted_token = j;
+    int token = tokens_size - 1;
+    for(int i = 0; i < tokens_size; i++) {
+        cumulative += probs[i];
+        if(cumulative >= r) {
+            token = i;
             break;
         }
     }
-    return predicted_token;
+    *output_token = token;
+}
+
+__global__ void one_hot_encode_gpu(DATA_TYPE* context, int tokens_size, int token) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= tokens_size) return;
+    context[(CONTEXT_LENGTH - 1) * tokens_size + idx] = (idx == token) ? 1.0 : 0.0;
 }
 
 int test_nn(NN* nn, DATA_TYPE* dataset, char* tokens, int pos) {
-    DATA_TYPE* host_context = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * 128 * 65);
+    DATA_TYPE* host_context = (DATA_TYPE*)malloc(sizeof(DATA_TYPE) * CONTEXT_LENGTH * TOKENS_SIZE);
     DATA_TYPE* device_context;
-    cudaMalloc(&device_context, sizeof(DATA_TYPE) * 128 * 65);
+    cudaMalloc(&device_context, sizeof(DATA_TYPE) * CONTEXT_LENGTH * TOKENS_SIZE);
 
-    cudaMemcpy(device_context, dataset + pos * 65, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(host_context, device_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyDeviceToHost);
+    cudaMemcpy(device_context, dataset + pos * TOKENS_SIZE,
+               sizeof(DATA_TYPE) * CONTEXT_LENGTH * TOKENS_SIZE, cudaMemcpyDeviceToDevice);
+    cudaMemcpy(host_context, device_context,
+               sizeof(DATA_TYPE) * CONTEXT_LENGTH * TOKENS_SIZE, cudaMemcpyDeviceToHost);
 
     char input_text[129];
-    for(int j = 0; j < 128; j++) {
-        input_text[j] = untokenizer(test_unembed(host_context + j * 65), tokens);
+    for(int j = 0; j < CONTEXT_LENGTH; j++) {
+        int best = 0;
+        for(int k = 1; k < TOKENS_SIZE; k++) {
+            if(host_context[j * TOKENS_SIZE + k] > host_context[j * TOKENS_SIZE + best]) best = k;
+        }
+        input_text[j] = untokenizer(best, tokens);
     }
-    input_text[128] = '\0';
+    input_text[CONTEXT_LENGTH] = '\0';
+    free(host_context);
+
+    static unsigned int* d_rng_state = NULL;
+    static int* d_predicted_token = NULL;
+    if(d_rng_state == NULL) {
+        cudaMalloc(&d_rng_state, sizeof(unsigned int));
+        cudaMalloc(&d_predicted_token, sizeof(int));
+        unsigned int seed = 42;
+        cudaMemcpy(d_rng_state, &seed, sizeof(unsigned int), cudaMemcpyHostToDevice);
+    }
+
+    int softmax_idx = nn->num_layers - 1;
+    int encode_blocks = (TOKENS_SIZE + 255) / 256;
 
     char output_text[65];
     for(int step = 0; step < 64; step++) {
         call_nn(nn, device_context, 0);
 
-        cudaMemcpy(host_context + 127 * 65,
-                   nn->layers[nn->num_layers - 1].output.tensor.output + 127 * 65,
-                   sizeof(DATA_TYPE) * 65,
-                   cudaMemcpyDeviceToHost);
+        sample_token_gpu<<<1, 1>>>(d_rng_state,
+            nn->layers[softmax_idx].output.tensor.output + (CONTEXT_LENGTH - 1) * TOKENS_SIZE,
+            TOKENS_SIZE, d_predicted_token);
+        cudaDeviceSynchronize();
 
-        int predicted_token = test_unembed(host_context + 127 * 65);
+        int predicted_token;
+        cudaMemcpy(&predicted_token, d_predicted_token, sizeof(int), cudaMemcpyDeviceToHost);
         output_text[step] = untokenizer(predicted_token, tokens);
 
-        memmove(host_context, host_context + 65, sizeof(DATA_TYPE) * 127 * 65);
+        cudaMemcpy(device_context, device_context + TOKENS_SIZE,
+                   sizeof(DATA_TYPE) * (CONTEXT_LENGTH - 1) * TOKENS_SIZE,
+                   cudaMemcpyDeviceToDevice);
 
-        for(int j = 0; j < 65; j++) {
-            host_context[127 * 65 + j] = predicted_token == j ? 1.0 : 0.0;
-        }
-
-        cudaMemcpy(device_context, host_context, sizeof(DATA_TYPE) * 128 * 65, cudaMemcpyHostToDevice);
+        one_hot_encode_gpu<<<encode_blocks, 256>>>(device_context, TOKENS_SIZE, predicted_token);
+        cudaDeviceSynchronize();
     }
     output_text[64] = '\0';
+
+    cudaFree(device_context);
 
     printf("\x1b[31m----------------------------\x1b[0m\n");
     printf("input:\n%s\n\n", input_text);
     printf("output:\n%s\n", output_text);
     printf("\x1b[31m----------------------------\x1b[0m\n");
-
-    free(host_context);
-    cudaFree(device_context);
     return 0;
 }
 

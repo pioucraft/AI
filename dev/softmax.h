@@ -10,6 +10,7 @@
 int create_softmax_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TENSOR_MAX_RANK], DATA_TYPE temperature);
 
 __global__ void softmax_zero_exp_sums(Layer layer);
+__global__ void softmax_compute_max(Layer layer);
 __global__ void softmax_compute_exps(Layer layer);
 __global__ void softmax_compute_outputs(Layer layer);
 

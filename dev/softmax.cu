@@ -9,10 +9,12 @@ int create_softmax_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TE
 
     DATA_TYPE* exp_values;
     DATA_TYPE* sums_exp_values;
+    DATA_TYPE* max_values;
     DATA_TYPE* grad_sums;
 
     cudaMalloc(&exp_values, input_size * sizeof(DATA_TYPE));
     cudaMalloc(&sums_exp_values, tensor_dimensions[0] * sizeof(DATA_TYPE));
+    cudaMalloc(&max_values, tensor_dimensions[0] * sizeof(DATA_TYPE));
     cudaMalloc(&grad_sums, tensor_dimensions[0] * sizeof(DATA_TYPE));
 
     *layer = (Layer){
@@ -37,6 +39,7 @@ int create_softmax_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TE
 
                 .exp_values = exp_values,
                 .sums_exp_values = sums_exp_values,
+                .max_values = max_values,
                 .grad_sums = grad_sums
             }
         }
@@ -49,25 +52,47 @@ int create_softmax_layer(Layer* layer, int tensor_rank, int tensor_dimensions[TE
 
 __global__ void softmax_zero_exp_sums(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (idx < layer.output.tensor.tensor_dimensions[0]) {
+    if(idx < layer.output.tensor.tensor_dimensions[0]) {
         layer.layer.softmax_layer.sums_exp_values[idx] = 0.0f;
+        layer.layer.softmax_layer.max_values[idx] = -INFINITY;
     }
+}
+
+__global__ void softmax_compute_max(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= layer.output.tensor.output_size) return;
+
+    int vector_idx = idx / layer.output.tensor.tensor_dimensions[1];
+    DATA_TYPE input_value = layer.input.tensor.input[idx];
+
+    int* addr_int = (int*)&layer.layer.softmax_layer.max_values[vector_idx];
+    int old = *addr_int;
+    int assumed;
+    do {
+        assumed = old;
+        DATA_TYPE old_val = __int_as_float(assumed);
+        if(old_val >= input_value) break;
+        old = atomicCAS(addr_int, assumed, __float_as_int(input_value));
+    } while(assumed != old);
 }
 
 __global__ void softmax_compute_exps(Layer layer) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (idx < layer.input.tensor.input_size) {
-        int feature_size = layer.output.tensor.tensor_dimensions[1];
-        int vector_idx = idx / feature_size;
-
-        DATA_TYPE input_value = layer.input.tensor.input[idx];
-        DATA_TYPE exp_value = expf(input_value / layer.layer.softmax_layer.temperature);
-
-        layer.layer.softmax_layer.exp_values[idx] = exp_value;
-        atomicAdd(&layer.layer.softmax_layer.sums_exp_values[vector_idx], exp_value);
+    if(idx >= layer.output.tensor.output_size) {
+        return;
     }
+
+    int vector_idx = idx / layer.output.tensor.tensor_dimensions[1];
+    int element_idx = idx % layer.output.tensor.tensor_dimensions[1];
+
+    DATA_TYPE input_value = layer.input.tensor.input[idx];
+    DATA_TYPE max_value = layer.layer.softmax_layer.max_values[vector_idx];
+    DATA_TYPE temperature = layer.layer.softmax_layer.temperature;
+    DATA_TYPE exp_value = expf((input_value - max_value) / temperature);
+
+    layer.layer.softmax_layer.exp_values[idx] = exp_value;
+    atomicAdd(&layer.layer.softmax_layer.sums_exp_values[vector_idx], exp_value);
 }
 
 __global__ void softmax_compute_outputs(Layer layer) {

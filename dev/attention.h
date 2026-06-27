@@ -16,6 +16,7 @@ __global__ void attention_forward_value(Layer layer);
 __global__ void attention_forward_scores(Layer layer);
 __global__ void attention_forward_masking(Layer layer);
 __global__ void attention_softmax_zero_exp_sums(Layer layer);
+__global__ void attention_softmax_compute_max(Layer layer);
 __global__ void attention_softmax_compute_exps(Layer layer);
 __global__ void attention_softmax_compute_outputs(Layer layer);
 __global__ void attention_forward_value_weighted_sum(Layer layer);

@@ -60,10 +60,12 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
 
     DATA_TYPE* softmax_exp_values;
     DATA_TYPE* softmax_sums_exp_values;
+    DATA_TYPE* softmax_max_values;
     DATA_TYPE* softmax_grad_sums;
 
     cudaMalloc(&softmax_exp_values, context_length * context_length * num_heads * sizeof(DATA_TYPE));
     cudaMalloc(&softmax_sums_exp_values, context_length * num_heads * sizeof(DATA_TYPE));
+    cudaMalloc(&softmax_max_values, context_length * num_heads * sizeof(DATA_TYPE));
     cudaMalloc(&softmax_grad_sums, context_length * num_heads * sizeof(DATA_TYPE));
 
     DATA_TYPE* attention_scores_masked;
@@ -170,6 +172,7 @@ int create_attention_layer(Layer* layer, int context_length, int embedding_size,
 
                 .softmax_exp_values = softmax_exp_values,
                 .softmax_sums_exp_values = softmax_sums_exp_values,
+                .softmax_max_values = softmax_max_values,
                 .softmax_grad_sums = softmax_grad_sums,
 
                 .attention_percentages = attention_percentages,
@@ -300,7 +303,28 @@ __global__ void attention_softmax_zero_exp_sums(Layer layer) {
 
     if (idx < layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads) {
         layer.layer.attention_layer.softmax_sums_exp_values[idx] = 0.0f;
+        layer.layer.attention_layer.softmax_max_values[idx] = -INFINITY;
     }
+}
+
+__global__ void attention_softmax_compute_max(Layer layer) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= layer.layer.attention_layer.context_length * layer.layer.attention_layer.context_length * layer.layer.attention_layer.num_heads) return;
+
+    int vector_idx = idx / layer.layer.attention_layer.context_length;
+
+    DATA_TYPE input_value = layer.layer.attention_layer.attention_scores_masked[idx];
+
+    int* addr_int = (int*)&layer.layer.attention_layer.softmax_max_values[vector_idx];
+    int old = *addr_int;
+    int assumed;
+    do {
+        assumed = old;
+        DATA_TYPE old_val = __int_as_float(assumed);
+        if(old_val >= input_value) break;
+        old = atomicCAS(addr_int, assumed, __float_as_int(input_value));
+    } while(assumed != old);
 }
 
 __global__ void attention_softmax_compute_exps(Layer layer) {
@@ -311,7 +335,8 @@ __global__ void attention_softmax_compute_exps(Layer layer) {
         int element_idx = idx % layer.layer.attention_layer.context_length;
 
         DATA_TYPE input_value = layer.layer.attention_layer.attention_scores_masked[idx];
-        DATA_TYPE exp_value = expf(input_value / sqrtf((DATA_TYPE)layer.layer.attention_layer.query_key_size));
+        DATA_TYPE max_value = layer.layer.attention_layer.softmax_max_values[vector_idx];
+        DATA_TYPE exp_value = expf((input_value - max_value) / sqrtf((DATA_TYPE)layer.layer.attention_layer.query_key_size));
 
         layer.layer.attention_layer.softmax_exp_values[idx] = exp_value;
         atomicAdd(&layer.layer.attention_layer.softmax_sums_exp_values[vector_idx], exp_value);
